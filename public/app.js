@@ -31,7 +31,7 @@ async function checkHealth() {
     const r = await fetch('/api/health');
     const data = await r.json();
     els.health.classList.toggle('ok', !!data.ok);
-    const aiLabel = data.aiMode === 'gateway' ? 'AI gateway' : data.aiMode === 'direct' ? 'AI direct' : 'AI не настроен';
+    const aiLabel = data.aiMode === 'gateway' ? 'AI локально' : data.aiMode === 'direct' ? 'AI direct' : 'AI не настроен';
     els.health.innerHTML = `<span class="dot"></span>${data.ok ? 'Парсер готов' : 'Ошибка сервера'} · ${aiLabel}`;
   } catch {
     els.health.innerHTML = '<span class="dot"></span>Сервер недоступен';
@@ -155,7 +155,7 @@ function renderSelectedPlayer() {
   }
   els.selectedPlayer.innerHTML = `<strong>${esc(p.name)}</strong><br><span class="muted">${p.kills}/${p.deaths}/${p.assists} · ADR ${p.adr} · HS ${p.hsPct}% · Entry ${p.entryKills}:${p.openingDeaths}</span>`;
   els.aiBtn.disabled = false;
-  els.aiOutput.textContent = 'Готов к AI-разбору выбранного игрока.';
+  els.aiOutput.textContent = 'Готов к локальному AI-разбору выбранного игрока.';
   els.aiOutput.classList.add('muted');
 }
 
@@ -165,7 +165,7 @@ async function runAI() {
   els.aiBtn.disabled = true;
   els.aiBtn.textContent = 'Анализирую…';
   els.aiOutput.classList.remove('muted');
-  els.aiOutput.textContent = `OpenAI разбирает игру ${p?.name || ''}…`;
+  els.aiOutput.textContent = `Локальная модель разбирает игру ${p?.name || ''}…`;
   try {
     const response = await fetch('/api/ai', {
       method:'POST',
