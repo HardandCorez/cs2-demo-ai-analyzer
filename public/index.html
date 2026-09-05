@@ -23,13 +23,13 @@
   <main class="shell">
     <section class="hero">
       <div class="hero-copy">
-        <div class="eyebrow">REAL .DEM PARSER + OPENAI</div>
+        <div class="eyebrow">REAL .DEM PARSER + LOCAL AI</div>
         <h1>Разбирай демки CS2<br><span>как аналитик команды.</span></h1>
-        <p>Загрузи полноценный <strong>.dem</strong>. Сайт извлечёт статистику игроков, opening-duels, хедшоты, ADR, utility и события убийств, а затем даст AI-разбор выбранного игрока.</p>
+        <p>Загрузи полноценный <strong>.dem</strong>. Сайт извлечёт статистику игроков, opening-duels, хедшоты, ADR, utility и события убийств, а затем даст локальный AI-разбор выбранного игрока только по подтверждённым данным.</p>
       </div>
       <div class="hero-kpis">
         <div class="mini-card"><b>10</b><span>игроков</span></div>
-        <div class="mini-card"><b>160</b><span>событий</span></div>
+        <div class="mini-card"><b>400</b><span>событий</span></div>
         <div class="mini-card"><b>AI</b><span>коучинг</span></div>
       </div>
     </section>
@@ -98,19 +98,19 @@
         <div class="panel ai-panel">
           <div class="panel-head">
             <div>
-              <div class="eyebrow">OPENAI COACH</div>
+              <div class="eyebrow">LOCAL VERIFIED COACH</div>
               <h3>AI-разбор</h3>
             </div>
           </div>
           <div class="selected-player" id="selectedPlayer">Выбери игрока в таблице</div>
           <button class="primary full" id="aiBtn" type="button" disabled>Запустить AI-анализ</button>
-          <div class="ai-output muted" id="aiOutput">Здесь появятся сильные стороны, ошибки и план тренировки.</div>
+          <div class="ai-output muted" id="aiOutput">Здесь появятся только подтверждённые сильные стороны, проблемы и план тренировки.</div>
         </div>
       </div>
     </section>
   </main>
 
-  <footer>HardandCore Demo AI · локальная обработка .dem + серверный OpenAI API</footer>
+  <footer>HardandCore Demo AI · локальная обработка .dem + Ollama · verified metrics mode</footer>
   <script type="module" src="/app.js"></script>
 </body>
 </html>
