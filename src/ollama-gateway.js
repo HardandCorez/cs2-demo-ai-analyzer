@@ -5,7 +5,7 @@ const app = express();
 const host = '127.0.0.1';
 const port = Number(process.env.OLLAMA_GATEWAY_PORT || 11435);
 const ollamaUrl = String(process.env.OLLAMA_URL || 'http://127.0.0.1:11434').trim().replace(/\/+$/, '');
-const model = String(process.env.OLLAMA_MODEL || 'qwen3:8b').trim();
+const model = String(process.env.OLLAMA_MODEL || 'qwen3:4b').trim();
 const gatewayToken = String(process.env.AI_GATEWAY_TOKEN || '').trim();
 const timeoutMs = Math.max(60_000, Number(process.env.AI_TIMEOUT_MS || 600_000));
 
@@ -120,6 +120,90 @@ function buildCoachPayload(match) {
   };
 }
 
+const answerSchema = {
+  type: 'object',
+  properties: {
+    score: { type: 'integer', minimum: 0, maximum: 100 },
+    strengths: {
+      type: 'array',
+      maxItems: 3,
+      items: {
+        type: 'object',
+        properties: {
+          point: { type: 'string' },
+          evidence: { type: 'string' },
+        },
+        required: ['point', 'evidence'],
+      },
+    },
+    problems: {
+      type: 'array',
+      maxItems: 3,
+      items: {
+        type: 'object',
+        properties: {
+          point: { type: 'string' },
+          evidence: { type: 'string' },
+        },
+        required: ['point', 'evidence'],
+      },
+    },
+    unknowns: { type: 'array', maxItems: 8, items: { type: 'string' } },
+    actions: { type: 'array', minItems: 3, maxItems: 5, items: { type: 'string' } },
+    conclusion: { type: 'string' },
+  },
+  required: ['score', 'strengths', 'problems', 'unknowns', 'actions', 'conclusion'],
+};
+
+function stripThinkBlocks(text) {
+  return String(text || '')
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/^[\s\S]*?<\/think>/i, '')
+    .trim();
+}
+
+function parseStructuredAnswer(raw) {
+  const cleaned = stripThinkBlocks(raw);
+  try {
+    return JSON.parse(cleaned);
+  } catch {}
+
+  const first = cleaned.indexOf('{');
+  const last = cleaned.lastIndexOf('}');
+  if (first >= 0 && last > first) {
+    try {
+      return JSON.parse(cleaned.slice(first, last + 1));
+    } catch {}
+  }
+  return null;
+}
+
+function formatAnswer(answer) {
+  const lines = [];
+  lines.push(`Оценка: ${Math.max(0, Math.min(100, asNumber(answer?.score)))} / 100`);
+
+  lines.push('', 'Подтверждённые сильные стороны:');
+  const strengths = asArray(answer?.strengths).slice(0, 3);
+  if (!strengths.length) lines.push('— Недостаточно данных для подтверждённых сильных сторон.');
+  strengths.forEach((item, i) => lines.push(`${i + 1}. ${String(item?.point || '').trim()} (${String(item?.evidence || '').trim()})`));
+
+  lines.push('', 'Подтверждённые проблемы:');
+  const problems = asArray(answer?.problems).slice(0, 3);
+  if (!problems.length) lines.push('— Явные проблемы по доступным метрикам не подтверждены.');
+  problems.forEach((item, i) => lines.push(`${i + 1}. ${String(item?.point || '').trim()} (${String(item?.evidence || '').trim()})`));
+
+  lines.push('', 'Что нельзя определить по этим данным:');
+  const unknowns = asArray(answer?.unknowns).slice(0, 8);
+  if (!unknowns.length) lines.push('— Дополнительных ограничений не указано.');
+  unknowns.forEach((item) => lines.push(`• ${String(item || '').trim()}`));
+
+  lines.push('', 'Действия на тренировку:');
+  asArray(answer?.actions).slice(0, 5).forEach((item, i) => lines.push(`${i + 1}. ${String(item || '').trim()}`));
+
+  lines.push('', 'Вывод:', String(answer?.conclusion || '').trim());
+  return lines.join('\n').trim();
+}
+
 async function ollamaRequest(path, options = {}) {
   return fetch(`${ollamaUrl}${path}`, {
     ...options,
@@ -138,7 +222,7 @@ app.get('/health', async (_req, res) => {
       ollamaUrl,
       model,
       timeoutMs,
-      evidenceMode: 'verified-metrics-v2',
+      evidenceMode: 'verified-json-v3',
       modelInstalled: models.some((name) => name === model || name.startsWith(`${model}:`)),
       models,
     });
@@ -159,19 +243,19 @@ app.post('/v1/analyze', authorize, async (req, res) => {
 
   const coachPayload = buildCoachPayload(match);
   const system = [
-    'Ты строгий аналитик Counter-Strike 2. Твоя задача — проверяемый разбор, а не правдоподобный рассказ.',
+    '/no_think',
+    'Ты строгий аналитик Counter-Strike 2.',
+    'Верни только финальный структурированный ответ по заданной JSON-схеме. Не показывай рассуждения, chain-of-thought, черновик, перевод задания или анализ JSON.',
     'Главный источник фактов — verifiedMetrics. relatedKillEvents можно использовать только как подтверждение конкретного события и раунда.',
-    'Каждый вывод о сильной стороне или проблеме обязан содержать в скобках числовое доказательство из verifiedMetrics или номер раунда из relatedKillEvents.',
-    'Если dataAvailability для метрики false, запрещено делать выводы по этой теме. Напиши, что данных недостаточно.',
-    'Запрещено придумывать: время реакции, первые 10 секунд раунда, позиции, ротации, трейды, клатчи, экономику, T/CT-сплит, качество конкретной гранаты или количество брошенных флешек без соответствующих данных.',
-    'enemiesFlashed — количество зарегистрированных эффектов ослепления врагов, а НЕ число брошенных флешек.',
+    'Каждый плюс и минус обязан иметь числовое evidence из verifiedMetrics или номер раунда из relatedKillEvents.',
+    'Если dataAvailability для метрики false, запрещено делать выводы по этой теме.',
+    'Запрещено придумывать время реакции, первые секунды раунда, позиции, ротации, трейды, клатчи, экономику, T/CT-сплит, качество гранат и число брошенных флешек без соответствующих данных.',
+    'enemiesFlashed — число зарегистрированных эффектов ослепления врагов, не число флешек.',
     'customImpact — внутренний коэффициент проекта, не HLTV Rating.',
-    'Не называй K/D 1.0+ низким без сравнительного контекста. Используй generalHeuristics только как осторожный ориентир.',
-    'Не превращай высокий HS% в доказательство хорошей тактики или позиционирования.',
-    'Не повторяй число, если не можешь найти его во входном JSON.',
-    'Если выборка openingAttempts мала, прямо укажи, что вывод по opening ограничен выборкой.',
-    'Отвечай по-русски.',
-    'Формат строго такой: 1) Оценка 0-100. 2) Подтвержденные сильные стороны — до 3 пунктов. 3) Подтвержденные проблемы — до 3 пунктов. 4) Что нельзя заключить из этих данных. 5) 5 действий на тренировку, привязанных только к подтвержденным проблемам. 6) Короткий вывод.',
+    'Не называй K/D выше 1.0 низким без явного сравнительного основания.',
+    'Не выдавай высокий HS% за доказательство хорошей тактики, позиции или decision-making.',
+    'Если openingAttempts меньше 10, обязательно отметь малую выборку.',
+    'Все текстовые значения в JSON пиши по-русски.',
   ].join(' ');
 
   try {
@@ -182,15 +266,16 @@ app.post('/v1/analyze', authorize, async (req, res) => {
         model,
         stream: false,
         think: false,
+        format: answerSchema,
         keep_alive: '15m',
         messages: [
           { role: 'system', content: system },
-          { role: 'user', content: `Проанализируй только эти проверенные данные:\n${JSON.stringify(coachPayload)}` },
+          { role: 'user', content: `/no_think\nПроанализируй только эти проверенные данные и верни ТОЛЬКО JSON по схеме:\n${JSON.stringify(coachPayload)}` },
         ],
         options: {
-          temperature: 0.05,
+          temperature: 0,
           num_ctx: 4096,
-          num_predict: 900,
+          num_predict: 650,
         },
       }),
     });
@@ -204,14 +289,21 @@ app.post('/v1/analyze', authorize, async (req, res) => {
       return res.status(response.status).json({ error: detail, hint });
     }
 
-    const analysis = String(data?.message?.content || '').trim();
-    if (!analysis) return res.status(502).json({ error: 'Ollama вернул ответ без текста' });
+    const raw = String(data?.message?.content || '').trim();
+    const structured = parseStructuredAnswer(raw);
+    if (!structured) {
+      return res.status(502).json({
+        error: 'Локальная модель вернула ответ не в ожидаемом JSON-формате',
+        hint: 'Перезапусти gateway после git pull. Если повторяется, попробуй qwen3:4b или обнови Ollama.',
+      });
+    }
 
+    const analysis = formatAnswer(structured);
     res.json({
       analysis,
       model,
       provider: 'ollama-local',
-      evidenceMode: 'verified-metrics-v2',
+      evidenceMode: 'verified-json-v3',
       verifiedMetrics: coachPayload.verifiedMetrics,
     });
   } catch (error) {
@@ -221,7 +313,7 @@ app.post('/v1/analyze', authorize, async (req, res) => {
         ? `Локальная модель не ответила за ${Math.round(timeoutMs / 1000)} секунд`
         : `Ollama недоступен: ${error?.message || error}`,
       hint: timeout
-        ? 'Первый запуск модели может быть долгим. Проверь загрузку CPU/GPU и при необходимости используй qwen3:4b.'
+        ? 'Проверь загрузку CPU/GPU и используй qwen3:4b, если 8b работает слишком медленно.'
         : 'Проверь, что Ollama запущен и отвечает на http://127.0.0.1:11434.',
     });
   }
@@ -231,6 +323,6 @@ app.listen(port, host, () => {
   console.log(`Local Ollama gateway: http://${host}:${port}`);
   console.log(`Ollama: ${ollamaUrl}`);
   console.log(`Model: ${model}`);
-  console.log(`Evidence mode: verified-metrics-v2`);
+  console.log('Evidence mode: verified-json-v3');
   console.log(`AI timeout: ${Math.round(timeoutMs / 1000)}s`);
 });
