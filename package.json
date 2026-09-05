@@ -1,14 +1,14 @@
 {
   "name": "hardandcore-cs2-demo-ai",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "private": true,
   "type": "module",
-  "description": "CS2 demo analyzer with V7 real radar overlays, V6.1 positioning heuristics and local Ollama coaching",
+  "description": "CS2 demo analyzer with V7.1 interactive real radar, death trajectories, V6.1 positioning heuristics and local Ollama coaching",
   "scripts": {
-    "start": "node src/server.js",
+    "start": "node src/server-v71.js",
     "start:ollama-gateway": "node src/ollama-gateway-v61.js",
-    "dev": "node --watch src/server.js",
-    "check": "node --check src/server.js && node --check src/v5-metrics.js && node --check src/v6-positioning.js && node --check src/ollama-gateway-v61.js && node --check public/radar-catalog.js && node --check public/app.js"
+    "dev": "node --watch src/server-v71.js",
+    "check": "node --check src/server.js && node --check src/server-v71.js && node --check src/v5-metrics.js && node --check src/v6-positioning.js && node --check src/v71-trajectories.js && node --check src/ollama-gateway-v61.js && node --check public/radar-catalog.js && node --check public/app.js"
   },
   "engines": {
     "node": ">=20"
