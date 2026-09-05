@@ -5,6 +5,7 @@ const els = {
   error: $('#errorBox'), results: $('#results'), matchTitle: $('#matchTitle'), matchMeta: $('#matchMeta'), matchBadges: $('#matchBadges'),
   metrics: $('#metrics'), scoreBody: $('#scoreBody'), timeline: $('#timeline'), timelineFilter: $('#timelineFilter'),
   selectedPlayer: $('#selectedPlayer'), aiBtn: $('#aiBtn'), aiOutput: $('#aiOutput'),
+  positionMode: $('#positionMode'), positionCanvas: $('#positionCanvas'), positionSummary: $('#positionSummary'), positionEmpty: $('#positionEmpty'),
 };
 
 let match = null;
@@ -12,6 +13,11 @@ let selectedSteamid = null;
 
 function esc(value) {
   return String(value ?? '').replace(/[&<>'"]/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[m]));
+}
+
+function fmt(value, suffix = '') {
+  if (value === null || value === undefined || value === '') return '—';
+  return `${value}${suffix}`;
 }
 
 function setError(message = '') {
@@ -32,8 +38,8 @@ async function checkHealth() {
     const data = await r.json();
     els.health.classList.toggle('ok', !!data.ok);
     const aiLabel = data.aiMode === 'gateway' ? 'AI локально' : data.aiMode === 'direct' ? 'AI direct' : 'AI не настроен';
-    const v5 = data.advancedMetricsVersion ? ' · V5' : '';
-    els.health.innerHTML = `<span class="dot"></span>${data.ok ? 'Парсер готов' : 'Ошибка сервера'} · ${aiLabel}${v5}`;
+    const version = data.advancedMetricsVersion ? ` · ${data.advancedMetricsVersion}` : '';
+    els.health.innerHTML = `<span class="dot"></span>${data.ok ? 'Парсер готов' : 'Ошибка сервера'} · ${aiLabel}${version}`;
   } catch {
     els.health.innerHTML = '<span class="dot"></span>Сервер недоступен';
   }
@@ -44,7 +50,7 @@ function fakeProgressUntil(responsePromise) {
   setProgress(pct, 'Загрузка демки…');
   const timer = setInterval(() => {
     pct = Math.min(88, pct + Math.max(1, (90 - pct) * 0.08));
-    const label = pct < 35 ? 'Загрузка демки…' : pct < 72 ? 'Парсер читает события CS2…' : 'Считаем V5-метрики…';
+    const label = pct < 30 ? 'Загрузка демки…' : pct < 62 ? 'Парсер читает события CS2…' : pct < 80 ? 'Считаем V5 метрики…' : 'Снимаем V6 координаты…';
     setProgress(pct, label);
   }, 300);
   return responsePromise.finally(() => clearInterval(timer));
@@ -80,25 +86,26 @@ function renderMatch() {
   els.matchBadges.innerHTML = [
     match.demoVersion && `<span class="badge">${esc(match.demoVersion)}</span>`,
     match.parser && `<span class="badge">${esc(match.parser)}</span>`,
-    match.advancedMetricsVersion && `<span class="badge">V5 advanced</span>`,
+    match.advancedMetricsVersion && `<span class="badge">${esc(match.advancedMetricsVersion)}</span>`,
     match.networkProtocol && `<span class="badge">protocol ${esc(match.networkProtocol)}</span>`,
   ].filter(Boolean).join('');
 
   const top = match.players?.[0];
   const avgAdr = match.players?.length ? Math.round(match.players.reduce((s,p)=>s+(p.adr||0),0)/match.players.length) : 0;
-  const kastValues = (match.players || []).map((p) => Number(p.kastPct)).filter(Number.isFinite);
-  const avgKast = kastValues.length ? `${Math.round(kastValues.reduce((s,n)=>s+n,0)/kastValues.length)}%` : '—';
+  const avgKastValues = (match.players || []).map((p) => Number(p.kastPct)).filter(Number.isFinite);
+  const avgKast = avgKastValues.length ? (avgKastValues.reduce((s,n)=>s+n,0) / avgKastValues.length).toFixed(1) : '—';
   els.metrics.innerHTML = [
     ['Раунды', match.rounds || 0],
     ['Лучший по impact', top?.name || '—'],
-    ['Топ K/D', top?.kd ?? '—'],
-    ['Средний KAST', avgKast],
+    ['Средний ADR', avgAdr],
+    ['Средний KAST', avgKast === '—' ? '—' : `${avgKast}%`],
   ].map(([label, value]) => `<div class="metric"><span>${esc(label)}</span><b>${esc(value)}</b></div>`).join('');
 
   renderScoreboard();
   renderFilters();
   renderTimeline();
   renderSelectedPlayer();
+  requestAnimationFrame(renderPositioning);
   els.results.scrollIntoView({ behavior:'smooth', block:'start' });
 }
 
@@ -110,7 +117,7 @@ function renderScoreboard() {
       <td class="rank">${i+1}</td>
       <td><div class="player-cell"><b>${esc(p.name)}</b><span>${esc(p.teamName || (p.teamNumber === 3 ? 'CT' : p.teamNumber === 2 ? 'T' : ''))}</span></div></td>
       <td class="good">${p.kills}</td><td>${p.deaths}</td><td>${p.assists}</td><td>${p.kd}</td><td>${p.adr}</td><td>${p.hsPct}%</td>
-      <td class="good">${p.entryKills}</td><td class="${p.openingDeaths > p.entryKills ? 'bad' : ''}">${p.openingDeaths}</td><td>${p.utilityDamage}</td>
+      <td>${fmt(p.kastPct, '%')}</td><td>${p.tradeKills ?? 0}</td><td class="good">${p.entryKills}</td><td class="${p.openingDeaths > p.entryKills ? 'bad' : ''}">${p.openingDeaths}</td>
     </tr>`;
   }).join('');
   els.scoreBody.querySelectorAll('tr').forEach((row) => row.addEventListener('click', () => {
@@ -119,6 +126,7 @@ function renderScoreboard() {
     renderSelectedPlayer();
     els.timelineFilter.value = selectedSteamid;
     renderTimeline();
+    renderPositioning();
   }));
 }
 
@@ -140,14 +148,18 @@ function renderTimeline() {
     els.timeline.innerHTML = '<div class="muted">События убийств не найдены.</div>';
     return;
   }
-  els.timeline.innerHTML = rows.map((e) => `<div class="event">
-    <div class="event-round">R${e.round || '?'}</div>
-    <div class="event-main"><strong>${esc(e.attacker || 'world')}</strong> → <strong>${esc(e.victim || '?')}</strong>
-      ${e.weapon ? `<span class="weapon"> · ${esc(e.weapon)}</span>` : ''}${e.headshot ? '<span class="hs">HS</span>' : ''}
-      ${Number.isFinite(Number(e.secondsIntoRound)) ? `<span class="weapon"> · ${Number(e.secondsIntoRound).toFixed(1)}s</span>` : ''}
-      ${e.tradeKill ? '<span class="hs">TRADE</span>' : ''}
-    </div>
-  </div>`).join('');
+  els.timeline.innerHTML = rows.map((e) => {
+    const timing = Number.isFinite(Number(e.secondsIntoRound)) ? ` · ${Number(e.secondsIntoRound).toFixed(1)}с` : '';
+    const trade = e.tradeKill ? '<span class="trade">TRADE</span>' : '';
+    const place = e.victimPlace ? `<span class="place"> · ${esc(e.victimPlace)}</span>` : '';
+    const spacing = Number.isFinite(Number(e.nearestTeammateDistance)) ? `<span class="context"> · mate ${Math.round(e.nearestTeammateDistance)}u</span>` : '';
+    return `<div class="event">
+      <div class="event-round">R${e.round || '?'}${timing}</div>
+      <div class="event-main"><strong>${esc(e.attacker || 'world')}</strong> → <strong>${esc(e.victim || '?')}</strong>
+        ${e.weapon ? `<span class="weapon"> · ${esc(e.weapon)}</span>` : ''}${e.headshot ? '<span class="hs">HS</span>' : ''}${trade}${place}${spacing}
+      </div>
+    </div>`;
+  }).join('');
 }
 
 function renderSelectedPlayer() {
@@ -157,17 +169,145 @@ function renderSelectedPlayer() {
     els.aiBtn.disabled = true;
     return;
   }
+
   const advanced = [
-    p.kastPct != null ? `KAST ${p.kastPct}%` : null,
-    match?.dataAvailability?.tradeDetection ? `Trades ${p.tradeKills || 0} · traded deaths ${p.tradedDeaths || 0}${p.tradedDeathPct != null ? ` (${p.tradedDeathPct}%)` : ''}` : null,
-    `2K+ rounds ${p.multiKillRounds || 0}`,
-    match?.dataAvailability?.clutchDetection ? `Clutch ${p.clutchWins || 0}/${p.clutchAttempts || 0}` : null,
-    match?.dataAvailability?.firstContactTiming && p.avgOpeningDuelTimeSec != null ? `Opening timing ${p.avgOpeningDuelTimeSec}s` : null,
+    p.kastPct !== null && p.kastPct !== undefined ? `KAST ${p.kastPct}%` : null,
+    `trades ${p.tradeKills ?? 0}`,
+    p.tradedDeathPct !== null && p.tradedDeathPct !== undefined ? `traded ${p.tradedDeathPct}%` : null,
+    p.avgOpeningDuelTimeSec !== null && p.avgOpeningDuelTimeSec !== undefined ? `opening ${p.avgOpeningDuelTimeSec}с` : null,
   ].filter(Boolean).join(' · ');
-  els.selectedPlayer.innerHTML = `<strong>${esc(p.name)}</strong><br><span class="muted">${p.kills}/${p.deaths}/${p.assists} · ADR ${p.adr} · HS ${p.hsPct}% · Entry ${p.entryKills}:${p.openingDeaths}</span>${advanced ? `<br><span class="muted">${esc(advanced)}</span>` : ''}`;
+
+  const v6 = [
+    p.avgNearestTeammateDistanceAtDeath !== null && p.avgNearestTeammateDistanceAtDeath !== undefined ? `mate dist ${Math.round(p.avgNearestTeammateDistanceAtDeath)}u` : null,
+    p.flashedDeathPct !== null && p.flashedDeathPct !== undefined ? `flash deaths ${p.flashedDeathPct}%` : null,
+    p.highSpeedDeathPct !== null && p.highSpeedDeathPct !== undefined ? `high-speed deaths ${p.highSpeedDeathPct}%` : null,
+    p.topDeathPlace ? `top zone ${p.topDeathPlace}` : null,
+  ].filter(Boolean).join(' · ');
+
+  els.selectedPlayer.innerHTML = `<strong>${esc(p.name)}</strong><br>
+    <span class="muted">${p.kills}/${p.deaths}/${p.assists} · ADR ${p.adr} · HS ${p.hsPct}% · Entry ${p.entryKills}:${p.openingDeaths}</span>
+    ${advanced ? `<br><span class="muted">${esc(advanced)}</span>` : ''}
+    ${v6 ? `<br><span class="v6-line">V6 · ${esc(v6)}</span>` : ''}`;
   els.aiBtn.disabled = false;
-  els.aiOutput.textContent = 'Готов к локальному AI-разбору с V5-метриками.';
+  els.aiOutput.textContent = 'Готов к локальному AI-разбору выбранного игрока.';
   els.aiOutput.classList.add('muted');
+}
+
+function positioningForPlayer(player) {
+  if (!player || !match?.positioning?.players) return null;
+  return match.positioning.players[player.name] || null;
+}
+
+function normalizedBounds(points) {
+  const serverBounds = match?.positioning?.bounds;
+  if (serverBounds && [serverBounds.minX, serverBounds.maxX, serverBounds.minY, serverBounds.maxY].every((n) => Number.isFinite(Number(n)))) return serverBounds;
+  if (!points.length) return null;
+  const xs = points.map((p) => Number(p.x)).filter(Number.isFinite);
+  const ys = points.map((p) => Number(p.y)).filter(Number.isFinite);
+  if (!xs.length || !ys.length) return null;
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const padX = Math.max(100, (maxX - minX) * .08);
+  const padY = Math.max(100, (maxY - minY) * .08);
+  return { minX:minX-padX, maxX:maxX+padX, minY:minY-padY, maxY:maxY+padY };
+}
+
+function renderPositioning() {
+  if (!els.positionCanvas || !match) return;
+  const player = playerById(selectedSteamid);
+  const data = positioningForPlayer(player);
+  const mode = els.positionMode?.value || 'both';
+  const deaths = data?.deaths || [];
+  const kills = data?.kills || [];
+  const drawDeaths = mode !== 'kills' ? deaths : [];
+  const drawKills = mode !== 'deaths' ? kills : [];
+  const points = [...drawDeaths, ...drawKills];
+  const hasData = points.length > 0;
+  els.positionEmpty.classList.toggle('hidden', hasData);
+  els.positionCanvas.classList.toggle('hidden', !hasData);
+
+  if (!player) {
+    els.positionSummary.innerHTML = '<span class="muted">Выбери игрока.</span>';
+    return;
+  }
+
+  const chips = [
+    ['coord deaths', player.positionSamples ?? 0],
+    ['mate dist', player.avgNearestTeammateDistanceAtDeath == null ? '—' : `${Math.round(player.avgNearestTeammateDistanceAtDeath)}u`],
+    ['isolated*', player.isolatedDeathPct == null ? '—' : `${player.isolatedDeathPct}%`],
+    ['flash deaths', player.flashedDeathPct == null ? '—' : `${player.flashedDeathPct}%`],
+    ['high-speed*', player.highSpeedDeathPct == null ? '—' : `${player.highSpeedDeathPct}%`],
+    ['outside front*', player.attackerOutsideFrontPct == null ? '—' : `${player.attackerOutsideFrontPct}%`],
+    ['duel dist', player.avgDuelDistanceAtDeath == null ? '—' : `${Math.round(player.avgDuelDistanceAtDeath)}u`],
+    ['top death zone', player.topDeathPlace || '—'],
+  ];
+  els.positionSummary.innerHTML = chips.map(([label,value]) => `<div class="position-chip"><span>${esc(label)}</span><b>${esc(value)}</b></div>`).join('') +
+    '<div class="position-disclaimer">* эвристика без стен, этажей и line-of-sight; high-speed ≠ wide-peek.</div>';
+
+  if (!hasData) return;
+  const canvas = els.positionCanvas;
+  const rect = canvas.getBoundingClientRect();
+  const cssWidth = Math.max(320, Math.floor(rect.width || canvas.parentElement.clientWidth || 900));
+  const cssHeight = Math.max(360, Math.min(520, Math.floor(cssWidth * 0.52)));
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  canvas.width = Math.floor(cssWidth * dpr);
+  canvas.height = Math.floor(cssHeight * dpr);
+  canvas.style.height = `${cssHeight}px`;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,cssWidth,cssHeight);
+
+  const bounds = normalizedBounds(points);
+  if (!bounds) return;
+  const pad = 34;
+  const spanX = Math.max(1, Number(bounds.maxX) - Number(bounds.minX));
+  const spanY = Math.max(1, Number(bounds.maxY) - Number(bounds.minY));
+  const project = (p) => ({
+    x: pad + ((Number(p.x) - Number(bounds.minX)) / spanX) * (cssWidth - pad * 2),
+    y: cssHeight - pad - ((Number(p.y) - Number(bounds.minY)) / spanY) * (cssHeight - pad * 2),
+  });
+
+  ctx.fillStyle = '#0b0f14';
+  ctx.fillRect(0,0,cssWidth,cssHeight);
+  ctx.strokeStyle = 'rgba(255,255,255,.06)';
+  ctx.lineWidth = 1;
+  for (let i=1;i<6;i++) {
+    const x = pad + (cssWidth-pad*2)*(i/6);
+    const y = pad + (cssHeight-pad*2)*(i/6);
+    ctx.beginPath(); ctx.moveTo(x,pad); ctx.lineTo(x,cssHeight-pad); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(pad,y); ctx.lineTo(cssWidth-pad,y); ctx.stroke();
+  }
+
+  for (const p of drawDeaths) {
+    const q = project(p);
+    const g = ctx.createRadialGradient(q.x,q.y,2,q.x,q.y,20);
+    g.addColorStop(0,'rgba(255,107,117,.72)');
+    g.addColorStop(1,'rgba(255,107,117,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(q.x,q.y,20,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#ff6b75';
+    ctx.beginPath(); ctx.arc(q.x,q.y,3.2,0,Math.PI*2); ctx.fill();
+  }
+
+  for (const p of drawKills) {
+    const q = project(p);
+    ctx.fillStyle = 'rgba(107,231,255,.2)';
+    ctx.beginPath(); ctx.arc(q.x,q.y,10,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#6be7ff';
+    ctx.beginPath(); ctx.arc(q.x,q.y,3,0,Math.PI*2); ctx.fill();
+  }
+
+  const topPlace = player.topDeathPlace;
+  if (topPlace) {
+    const placePoints = deaths.filter((p) => p.place === topPlace);
+    if (placePoints.length) {
+      const center = placePoints.reduce((acc,p)=>({x:acc.x+Number(p.x),y:acc.y+Number(p.y)}),{x:0,y:0});
+      center.x /= placePoints.length; center.y /= placePoints.length;
+      const q = project(center);
+      ctx.font = '12px system-ui';
+      ctx.fillStyle = 'rgba(245,247,251,.9)';
+      ctx.fillText(`${topPlace} · ${placePoints.length} deaths`, Math.min(cssWidth-180,q.x+8), Math.max(18,q.y-8));
+    }
+  }
 }
 
 async function runAI() {
@@ -176,7 +316,7 @@ async function runAI() {
   els.aiBtn.disabled = true;
   els.aiBtn.textContent = 'Анализирую…';
   els.aiOutput.classList.remove('muted');
-  els.aiOutput.textContent = `Локальная модель разбирает игру ${p?.name || ''}…`;
+  els.aiOutput.textContent = `Локальная модель выбирает приоритеты V6 для ${p?.name || ''}…`;
   try {
     const response = await fetch('/api/ai', {
       method:'POST',
@@ -202,6 +342,8 @@ els.drop.addEventListener('dragover', (e) => { e.preventDefault(); els.drop.clas
 els.drop.addEventListener('dragleave', () => els.drop.classList.remove('drag'));
 els.drop.addEventListener('drop', (e) => { e.preventDefault(); els.drop.classList.remove('drag'); analyzeFile(e.dataTransfer.files?.[0]); });
 els.timelineFilter.addEventListener('change', renderTimeline);
+els.positionMode?.addEventListener('change', renderPositioning);
 els.aiBtn.addEventListener('click', runAI);
+window.addEventListener('resize', () => { if (match) requestAnimationFrame(renderPositioning); });
 
 checkHealth();
