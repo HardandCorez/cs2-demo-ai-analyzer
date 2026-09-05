@@ -1,14 +1,14 @@
 {
   "name": "hardandcore-cs2-demo-ai",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "type": "module",
-  "description": "CS2 demo analyzer with demoparser2, V6 positioning context and local Ollama coaching",
+  "description": "CS2 demo analyzer with V6.1 positioning, wide-peek/repeek heuristics and local Ollama coaching",
   "scripts": {
     "start": "node src/server.js",
-    "start:ollama-gateway": "node src/ollama-gateway.js",
+    "start:ollama-gateway": "node src/ollama-gateway-v61.js",
     "dev": "node --watch src/server.js",
-    "check": "node --check src/server.js && node --check src/v5-metrics.js && node --check src/v6-positioning.js && node --check src/ollama-gateway.js && node --check public/app.js"
+    "check": "node --check src/server.js && node --check src/v5-metrics.js && node --check src/v6-positioning.js && node --check src/ollama-gateway-v61.js && node --check public/app.js"
   },
   "engines": {
     "node": ">=20"
