@@ -11,6 +11,7 @@ import {
   parsePlayerInfo,
   parseTicks,
 } from '@laihoe/demoparser2';
+import { computeV5Metrics } from './v5-metrics.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -70,18 +71,39 @@ function pick(row, ...keys) {
 }
 
 function normalizeDeaths(rows) {
-  return asArray(rows).map((row) => ({
-    tick: asNumber(pick(row, 'tick')),
-    round: asNumber(pick(row, 'total_rounds_played', 'round', 'round_number')) + 1,
-    attacker: cleanName(pick(row, 'attacker_name', 'attacker_player_name', 'attacker')),
-    attackerSteamid: String(pick(row, 'attacker_steamid', 'attacker_steam_id') ?? ''),
-    victim: cleanName(pick(row, 'user_name', 'victim_name', 'player_name', 'victim')),
-    victimSteamid: String(pick(row, 'user_steamid', 'victim_steamid', 'player_steamid') ?? ''),
-    assister: cleanName(pick(row, 'assister_name', 'assister')),
-    weapon: cleanName(pick(row, 'weapon', 'weapon_name')).replace(/^weapon_/, ''),
-    headshot: Boolean(pick(row, 'headshot', 'is_headshot')),
-    penetrated: asNumber(pick(row, 'penetrated', 'penetrated_objects')),
-  })).filter((e) => e.attacker || e.victim || e.weapon);
+  return asArray(rows).map((row) => {
+    const gameTime = Number(pick(row, 'game_time'));
+    const roundStartTime = Number(pick(row, 'round_start_time'));
+    const secondsIntoRound = Number.isFinite(gameTime) && Number.isFinite(roundStartTime)
+      ? fixed(gameTime - roundStartTime, 2)
+      : null;
+    return {
+      tick: asNumber(pick(row, 'tick')),
+      round: asNumber(pick(row, 'total_rounds_played', 'round', 'round_number')) + 1,
+      attacker: cleanName(pick(row, 'attacker_name', 'attacker_player_name', 'attacker')),
+      attackerSteamid: String(pick(row, 'attacker_steamid', 'attacker_steam_id') ?? ''),
+      attackerTeam: cleanName(pick(row, 'attacker_team_name', 'attacker_team')),
+      attackerTeamNumber: asNumber(pick(row, 'attacker_team_num', 'attacker_team_number'), 0),
+      victim: cleanName(pick(row, 'user_name', 'victim_name', 'player_name', 'victim')),
+      victimSteamid: String(pick(row, 'user_steamid', 'victim_steamid', 'player_steamid') ?? ''),
+      victimTeam: cleanName(pick(row, 'user_team_name', 'victim_team_name', 'player_team_name')),
+      victimTeamNumber: asNumber(pick(row, 'user_team_num', 'victim_team_num', 'player_team_num'), 0),
+      assister: cleanName(pick(row, 'assister_name', 'assister')),
+      weapon: cleanName(pick(row, 'weapon', 'weapon_name')).replace(/^weapon_/, ''),
+      headshot: Boolean(pick(row, 'headshot', 'is_headshot')),
+      penetrated: asNumber(pick(row, 'penetrated', 'penetrated_objects')),
+      gameTime: Number.isFinite(gameTime) ? gameTime : null,
+      roundStartTime: Number.isFinite(roundStartTime) ? roundStartTime : null,
+      secondsIntoRound,
+      isWarmup: Boolean(pick(row, 'is_warmup_period')),
+    };
+  }).filter((e) => !e.isWarmup && (e.attacker || e.victim || e.weapon));
+}
+
+function isEnemyKill(e) {
+  if (!e?.attacker || !e?.victim || e.attacker === e.victim) return false;
+  if (e.attackerTeam && e.victimTeam && e.attackerTeam === e.victimTeam) return false;
+  return true;
 }
 
 function buildEntryStats(deaths) {
@@ -93,7 +115,7 @@ function buildEntryStats(deaths) {
   }
   for (const roundEvents of byRound.values()) {
     roundEvents.sort((a, b) => a.tick - b.tick);
-    const first = roundEvents.find((e) => e.attacker && e.victim && e.attacker !== e.victim);
+    const first = roundEvents.find(isEnemyKill);
     if (!first) continue;
     if (!byPlayer.has(first.attacker)) byPlayer.set(first.attacker, { entryKills: 0, openingDeaths: 0 });
     if (!byPlayer.has(first.victim)) byPlayer.set(first.victim, { entryKills: 0, openingDeaths: 0 });
@@ -178,7 +200,7 @@ function aggregateStats(tickRows, playerInfo, rounds, deaths) {
         impact: 0,
       });
     }
-    for (const death of deaths) {
+    for (const death of deaths.filter(isEnemyKill)) {
       const attacker = [...seen.values()].find((p) => p.name === death.attacker);
       const victim = [...seen.values()].find((p) => p.name === death.victim);
       const assister = [...seen.values()].find((p) => p.name === death.assister);
@@ -201,28 +223,82 @@ function aggregateStats(tickRows, playerInfo, rounds, deaths) {
 }
 
 function summarizeRounds(roundEnds) {
-  const rows = asArray(roundEnds);
+  const rows = asArray(roundEnds).filter((r) => !Boolean(pick(r, 'is_warmup_period')));
   const rounds = rows.length;
   const wins = {};
-  for (const r of rows) {
+  rows.forEach((r, index) => {
     const winner = cleanName(r.winner ?? r.winner_name ?? r.team ?? 'Unknown');
     wins[winner] = (wins[winner] || 0) + 1;
-  }
+  });
   return { rounds, wins };
+}
+
+function normalizeRoundEnds(rows) {
+  return asArray(rows).filter((r) => !Boolean(pick(r, 'is_warmup_period'))).map((r, index) => ({
+    round: asNumber(pick(r, 'total_rounds_played'), index) + 1,
+    tick: asNumber(r.tick),
+    winnerTeamNumber: asNumber(pick(r, 'winner', 'winner_team_num', 'team'), 0),
+    reason: cleanName(pick(r, 'reason', 'message')),
+  }));
+}
+
+function normalizeRoundStarts(rows, rounds) {
+  return asArray(rows).filter((r) => !Boolean(pick(r, 'is_warmup_period'))).map((r, index) => ({
+    round: asNumber(pick(r, 'total_rounds_played'), index) + 1,
+    tick: asNumber(r.tick),
+  })).filter((r) => r.tick > 0 && r.round >= 1 && r.round <= rounds);
+}
+
+function buildRoundRosters(roundStarts, rosterTicks) {
+  const roundByTick = new Map(roundStarts.map((r) => [r.tick, r.round]));
+  const rosters = {};
+  for (const row of asArray(rosterTicks)) {
+    const round = roundByTick.get(asNumber(row.tick));
+    if (!round) continue;
+    const name = cleanName(row.name ?? row.player_name);
+    const teamNumber = asNumber(row.team_num ?? row.team_number, 0);
+    if (!name || teamNumber < 2) continue;
+    if (!rosters[round]) rosters[round] = [];
+    if (!rosters[round].some((p) => p.name === name)) {
+      rosters[round].push({
+        name,
+        steamid: String(row.steamid ?? row.player_steamid ?? ''),
+        teamNumber,
+        teamName: cleanName(row.team_name ?? ''),
+      });
+    }
+  }
+  return rosters;
 }
 
 async function parseDemo(filePath, originalName) {
   const header = parseHeader(filePath) || {};
   const playerInfo = normalizePlayerInfo(parsePlayerInfo(filePath));
-  const roundEnds = asArray(parseEvent(filePath, 'round_end'));
-  const roundSummary = summarizeRounds(roundEnds);
-  const lastTick = roundEnds.reduce((max, r) => Math.max(max, asNumber(r.tick)), 0);
+
+  let roundEndRows = [];
+  try {
+    roundEndRows = asArray(parseEvent(filePath, 'round_end', [], ['total_rounds_played', 'is_warmup_period']));
+  } catch {
+    roundEndRows = asArray(parseEvent(filePath, 'round_end'));
+  }
+  const roundSummary = summarizeRounds(roundEndRows);
+  const normalizedRoundEnds = normalizeRoundEnds(roundEndRows);
+  const lastTick = roundEndRows.reduce((max, r) => Math.max(max, asNumber(r.tick)), 0);
 
   let deathRows = [];
   try {
-    deathRows = parseEvent(filePath, 'player_death', ['team_name'], ['total_rounds_played']);
+    deathRows = parseEvent(
+      filePath,
+      'player_death',
+      ['team_name', 'team_num'],
+      ['total_rounds_played', 'game_time', 'round_start_time', 'is_warmup_period'],
+    );
   } catch {
-    deathRows = parseEvent(filePath, 'player_death');
+    try {
+      deathRows = parseEvent(filePath, 'player_death', ['team_name'], ['total_rounds_played', 'game_time', 'round_start_time']);
+    } catch {
+      deathRows = parseEvent(filePath, 'player_death');
+    }
   }
   const deaths = normalizeDeaths(deathRows);
 
@@ -240,7 +316,27 @@ async function parseDemo(filePath, originalName) {
     }
   }
 
-  const players = aggregateStats(tickRows, playerInfo, roundSummary.rounds, deaths);
+  let rostersByRound = {};
+  try {
+    const roundStartRows = parseEvent(filePath, 'round_start', [], ['total_rounds_played', 'is_warmup_period']);
+    const roundStarts = normalizeRoundStarts(roundStartRows, roundSummary.rounds);
+    if (roundStarts.length) {
+      const rosterTicks = parseTicks(filePath, ['team_num', 'team_name'], roundStarts.map((r) => r.tick));
+      rostersByRound = buildRoundRosters(roundStarts, rosterTicks);
+    }
+  } catch (error) {
+    console.warn('Round rosters unavailable; clutch detection will stay limited:', error?.message || error);
+  }
+
+  const basePlayers = aggregateStats(tickRows, playerInfo, roundSummary.rounds, deaths);
+  const advanced = computeV5Metrics({
+    deaths,
+    players: basePlayers,
+    rounds: roundSummary.rounds,
+    rostersByRound,
+    roundEnds: normalizedRoundEnds,
+  });
+  const players = advanced.players.sort((a, b) => b.impact - a.impact || b.kills - a.kills);
   const best = players[0] || null;
 
   return {
@@ -253,8 +349,10 @@ async function parseDemo(filePath, originalName) {
     roundWinsBySide: roundSummary.wins,
     players,
     topPlayer: best,
-    timeline: deaths.slice(0, 400),
-    timelineTruncated: deaths.length > 400,
+    timeline: advanced.deaths.slice(0, 500),
+    timelineTruncated: advanced.deaths.length > 500,
+    dataAvailability: advanced.dataAvailability,
+    advancedMetricsVersion: 'v5-trades-kast-clutch-timing',
     parser: '@laihoe/demoparser2',
   };
 }
@@ -264,6 +362,7 @@ app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
     parser: '@laihoe/demoparser2',
+    advancedMetricsVersion: 'v5-trades-kast-clutch-timing',
     aiConfigured: aiMode !== 'none',
     aiMode,
   });
@@ -315,6 +414,27 @@ function buildVerifiedMetrics(selected, rounds) {
     roundSurvivalPctEstimate: rounds > 0
       ? Math.max(0, Math.min(100, Math.round(((rounds - asNumber(selected.deaths)) / rounds) * 100)))
       : null,
+    tradeKills: asNumber(selected.tradeKills),
+    tradedDeaths: asNumber(selected.tradedDeaths),
+    tradedDeathPct: selected.tradedDeathPct ?? null,
+    kastRounds: asNumber(selected.kastRounds),
+    kastPct: selected.kastPct ?? null,
+    twoK: asNumber(selected.twoK),
+    threeK: asNumber(selected.threeK),
+    fourK: asNumber(selected.fourK),
+    fiveK: asNumber(selected.fiveK),
+    multiKillRounds: asNumber(selected.multiKillRounds),
+    clutchAttempts: asNumber(selected.clutchAttempts),
+    clutchWins: asNumber(selected.clutchWins),
+    clutchWinPct: selected.clutchWinPct ?? null,
+    clutch1v1: asNumber(selected.clutch1v1),
+    clutch1v2: asNumber(selected.clutch1v2),
+    clutch1v3Plus: asNumber(selected.clutch1v3Plus),
+    avgFirstKillTimeSec: selected.avgFirstKillTimeSec ?? null,
+    avgDeathTimeSec: selected.avgDeathTimeSec ?? null,
+    avgOpeningKillTimeSec: selected.avgOpeningKillTimeSec ?? null,
+    avgOpeningDeathTimeSec: selected.avgOpeningDeathTimeSec ?? null,
+    avgOpeningDuelTimeSec: selected.avgOpeningDuelTimeSec ?? null,
     customImpact: fixed(selected.impact, 2),
   };
 }
@@ -325,8 +445,9 @@ function compactMatchForAI(match, selectedSteamid) {
     || match.players?.[0];
 
   const allRelated = asArray(match.timeline)
-    .filter((e) => !selected || e.attacker === selected.name || e.victim === selected.name || e.assister === selected.name);
-  const related = allRelated.slice(0, 60);
+    .filter((e) => !selected || e.attacker === selected.name || e.victim === selected.name || e.assister === selected.name || e.tradeOf === selected.name);
+  const related = allRelated.slice(0, 80);
+  const availability = match.dataAvailability || {};
 
   return {
     map: match.map,
@@ -339,18 +460,26 @@ function compactMatchForAI(match, selectedSteamid) {
       hsPct: 'headshot kills / kills * 100',
       enemiesFlashed: 'number of enemy flash effects registered by the parser; this is NOT the number of flashbangs thrown',
       openingSuccessPct: 'entryKills / (entryKills + openingDeaths) * 100',
-      roundSurvivalPctEstimate: 'estimated from match rounds and deaths; valid for a normal full-match participant',
+      tradeKills: 'kills within 5 seconds that directly revenge a teammate killed by the victim',
+      tradedDeaths: 'deaths revenged by a teammate within 5 seconds',
+      kastPct: 'percentage of rounds with Kill, Assist, Survival or Traded death',
+      multiKillRounds: 'rounds with at least two kills',
+      clutchAttempts: 'rounds where roster tracking shows the player became the sole survivor against at least one opponent',
+      clutchWins: 'clutch attempts where the player team won the round',
+      avgOpeningDuelTimeSec: 'average seconds from round_start_time to opening duel when selected player was involved',
       customImpact: 'project-specific heuristic, NOT HLTV Rating',
     },
     dataAvailability: {
       killEvents: true,
-      exactRoundStartTiming: false,
+      exactRoundStartTiming: Boolean(availability.firstContactTiming),
+      firstContactTiming: Boolean(availability.firstContactTiming),
       reactionTime: false,
       playerPositions: false,
-      tradeDetection: false,
-      clutchDetection: false,
+      tradeDetection: Boolean(availability.tradeDetection),
+      clutchDetection: Boolean(availability.clutchDetection),
       economy: false,
-      kast: false,
+      kast: Boolean(availability.kast),
+      multikills: Boolean(availability.multikills),
       flashbangsThrown: false,
       utilityCoordinates: false,
       sideSplitMetrics: false,
@@ -367,14 +496,14 @@ function strictCoachInstructions() {
     'Ты CS2-аналитик. Работай как проверяющий статистику, а не как рассказчик.',
     'Используй только verifiedMetrics, scoreboard, relatedKillEvents, metricDefinitions и dataAvailability.',
     'Каждый конкретный вывод должен опираться на числовую метрику или конкретное событие раунда из входных данных.',
-    'Никогда не выдумывай время реакции, позиционирование, ранние/поздние смерти, трейды, клатчи, экономику, сторону T/CT или использование конкретных гранат, если dataAvailability говорит false.',
+    'Никогда не выдумывай время реакции, позиционирование, экономику, сторону T/CT или качество гранат, если dataAvailability говорит false.',
+    'Трейды, KAST, multikills, clutch и timing разрешено обсуждать только когда соответствующий dataAvailability=true.',
     'enemiesFlashed означает зарегистрированные эффекты ослепления врагов, а не количество брошенных флешек.',
     'customImpact — внутренний коэффициент проекта, не называй его HLTV Rating.',
-    'Не называй K/D 1.0+ низким без явного сравнительного контекста. K/D около 1.2+ обычно можно описывать как сильный индивидуальный результат, но помечай это как общую эвристику, а не абсолютную норму.',
-    'Высокий HS% сам по себе не доказывает хорошее принятие решений и не должен автоматически считаться главным плюсом.',
+    'Не называй K/D 1.0+ низким без явного сравнительного контекста.',
+    'Высокий HS% сам по себе не доказывает хорошее принятие решений.',
     'Если метрика недоступна, прямо напиши: данных недостаточно для этого вывода.',
     'Формат ответа: Оценка 0-100; Подтвержденные сильные стороны; Подтвержденные проблемы; Что нельзя заключить из этих данных; 5 действий на тренировку; Короткий вывод.',
-    'Для каждого пункта сильной стороны/проблемы укажи в скобках подтверждающие значения, например: K/D 1.38, ADR 100.7, opening 2/6 = 33%.',
   ].join(' ');
 }
 
@@ -408,7 +537,7 @@ async function callOpenAIDirect(payload) {
       model,
       instructions: strictCoachInstructions(),
       input: `Разбери матч только по подтвержденным данным:\n${JSON.stringify(payload)}`,
-      max_output_tokens: 1400,
+      max_output_tokens: 1600,
     }),
     signal: AbortSignal.timeout(aiTimeoutMs),
   });
@@ -500,5 +629,6 @@ app.use((error, _req, res, _next) => {
 
 app.listen(port, () => {
   console.log(`CS2 Demo AI Analyzer: http://localhost:${port}`);
+  console.log('Advanced metrics: v5-trades-kast-clutch-timing');
   console.log(`AI mode: ${aiGatewayUrl ? `gateway -> ${aiGatewayUrl}` : process.env.OPENAI_API_KEY ? 'direct OpenAI' : 'not configured'}`);
 });
