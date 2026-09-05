@@ -38,8 +38,7 @@ async function checkHealth() {
     const data = await r.json();
     els.health.classList.toggle('ok', !!data.ok);
     const aiLabel = data.aiMode === 'gateway' ? 'AI локально' : data.aiMode === 'direct' ? 'AI direct' : 'AI не настроен';
-    const version = data.advancedMetricsVersion ? ` · ${data.advancedMetricsVersion}` : '';
-    els.health.innerHTML = `<span class="dot"></span>${data.ok ? 'Парсер готов' : 'Ошибка сервера'} · ${aiLabel}${version}`;
+    els.health.innerHTML = `<span class="dot"></span>${data.ok ? 'Парсер готов' : 'Ошибка сервера'} · ${aiLabel} · V6.1`;
   } catch {
     els.health.innerHTML = '<span class="dot"></span>Сервер недоступен';
   }
@@ -50,7 +49,7 @@ function fakeProgressUntil(responsePromise) {
   setProgress(pct, 'Загрузка демки…');
   const timer = setInterval(() => {
     pct = Math.min(88, pct + Math.max(1, (90 - pct) * 0.08));
-    const label = pct < 30 ? 'Загрузка демки…' : pct < 62 ? 'Парсер читает события CS2…' : pct < 80 ? 'Считаем V5 метрики…' : 'Снимаем V6 координаты…';
+    const label = pct < 30 ? 'Загрузка демки…' : pct < 62 ? 'Парсер читает события CS2…' : pct < 80 ? 'Считаем V5 метрики…' : 'Считаем V6.1 positioning + peek heuristics…';
     setProgress(pct, label);
   }, 300);
   return responsePromise.finally(() => clearInterval(timer));
@@ -86,7 +85,7 @@ function renderMatch() {
   els.matchBadges.innerHTML = [
     match.demoVersion && `<span class="badge">${esc(match.demoVersion)}</span>`,
     match.parser && `<span class="badge">${esc(match.parser)}</span>`,
-    match.advancedMetricsVersion && `<span class="badge">${esc(match.advancedMetricsVersion)}</span>`,
+    `<span class="badge">V6.1 peek heuristics</span>`,
     match.networkProtocol && `<span class="badge">protocol ${esc(match.networkProtocol)}</span>`,
   ].filter(Boolean).join('');
 
@@ -151,12 +150,14 @@ function renderTimeline() {
   els.timeline.innerHTML = rows.map((e) => {
     const timing = Number.isFinite(Number(e.secondsIntoRound)) ? ` · ${Number(e.secondsIntoRound).toFixed(1)}с` : '';
     const trade = e.tradeKill ? '<span class="trade">TRADE</span>' : '';
+    const wide = e.victimWidePeekLike ? '<span class="peek-flag">WIDE*</span>' : '';
+    const repeek = e.repeekLike ? '<span class="repeek-flag">REPEEK*</span>' : '';
     const place = e.victimPlace ? `<span class="place"> · ${esc(e.victimPlace)}</span>` : '';
     const spacing = Number.isFinite(Number(e.nearestTeammateDistance)) ? `<span class="context"> · mate ${Math.round(e.nearestTeammateDistance)}u</span>` : '';
     return `<div class="event">
       <div class="event-round">R${e.round || '?'}${timing}</div>
       <div class="event-main"><strong>${esc(e.attacker || 'world')}</strong> → <strong>${esc(e.victim || '?')}</strong>
-        ${e.weapon ? `<span class="weapon"> · ${esc(e.weapon)}</span>` : ''}${e.headshot ? '<span class="hs">HS</span>' : ''}${trade}${place}${spacing}
+        ${e.weapon ? `<span class="weapon"> · ${esc(e.weapon)}</span>` : ''}${e.headshot ? '<span class="hs">HS</span>' : ''}${trade}${wide}${repeek}${place}${spacing}
       </div>
     </div>`;
   }).join('');
@@ -180,16 +181,17 @@ function renderSelectedPlayer() {
   const v6 = [
     p.avgNearestTeammateDistanceAtDeath !== null && p.avgNearestTeammateDistanceAtDeath !== undefined ? `mate dist ${Math.round(p.avgNearestTeammateDistanceAtDeath)}u` : null,
     p.flashedDeathPct !== null && p.flashedDeathPct !== undefined ? `flash deaths ${p.flashedDeathPct}%` : null,
-    p.highSpeedDeathPct !== null && p.highSpeedDeathPct !== undefined ? `high-speed deaths ${p.highSpeedDeathPct}%` : null,
+    p.widePeekLikeDeathPct !== null && p.widePeekLikeDeathPct !== undefined ? `wide* ${p.widePeekLikeDeaths}/${p.widePeekSamples} (${p.widePeekLikeDeathPct}%)` : null,
+    p.repeekLikePct !== null && p.repeekLikePct !== undefined ? `repeek* ${p.repeekLikeDeaths}/${p.repeekEligibleSamples} (${p.repeekLikePct}%)` : null,
     p.topDeathPlace ? `top zone ${p.topDeathPlace}` : null,
   ].filter(Boolean).join(' · ');
 
   els.selectedPlayer.innerHTML = `<strong>${esc(p.name)}</strong><br>
     <span class="muted">${p.kills}/${p.deaths}/${p.assists} · ADR ${p.adr} · HS ${p.hsPct}% · Entry ${p.entryKills}:${p.openingDeaths}</span>
     ${advanced ? `<br><span class="muted">${esc(advanced)}</span>` : ''}
-    ${v6 ? `<br><span class="v6-line">V6 · ${esc(v6)}</span>` : ''}`;
+    ${v6 ? `<br><span class="v6-line">V6.1 · ${esc(v6)}</span>` : ''}`;
   els.aiBtn.disabled = false;
-  els.aiOutput.textContent = 'Готов к локальному AI-разбору выбранного игрока.';
+  els.aiOutput.textContent = 'Готов к локальному AI-разбору V6.1.';
   els.aiOutput.classList.add('muted');
 }
 
@@ -235,13 +237,15 @@ function renderPositioning() {
     ['mate dist', player.avgNearestTeammateDistanceAtDeath == null ? '—' : `${Math.round(player.avgNearestTeammateDistanceAtDeath)}u`],
     ['isolated*', player.isolatedDeathPct == null ? '—' : `${player.isolatedDeathPct}%`],
     ['flash deaths', player.flashedDeathPct == null ? '—' : `${player.flashedDeathPct}%`],
-    ['high-speed*', player.highSpeedDeathPct == null ? '—' : `${player.highSpeedDeathPct}%`],
-    ['outside front*', player.attackerOutsideFrontPct == null ? '—' : `${player.attackerOutsideFrontPct}%`],
+    ['wide-peek*', player.widePeekLikeDeathPct == null ? '—' : `${player.widePeekLikeDeaths}/${player.widePeekSamples} · ${player.widePeekLikeDeathPct}%`],
+    ['wide kills*', player.widePeekLikeKillPct == null ? '—' : `${player.widePeekLikeKills}/${player.widePeekKillSamples} · ${player.widePeekLikeKillPct}%`],
+    ['repeek*', player.repeekLikePct == null ? '—' : `${player.repeekLikeDeaths}/${player.repeekEligibleSamples} · ${player.repeekLikePct}%`],
     ['duel dist', player.avgDuelDistanceAtDeath == null ? '—' : `${Math.round(player.avgDuelDistanceAtDeath)}u`],
+    ['outside front*', player.attackerOutsideFrontPct == null ? '—' : `${player.attackerOutsideFrontPct}%`],
     ['top death zone', player.topDeathPlace || '—'],
   ];
   els.positionSummary.innerHTML = chips.map(([label,value]) => `<div class="position-chip"><span>${esc(label)}</span><b>${esc(value)}</b></div>`).join('') +
-    '<div class="position-disclaimer">* эвристика без стен, этажей и line-of-sight; high-speed ≠ wide-peek.</div>';
+    '<div class="position-disclaimer">* V6.1 эвристики без стен/navmesh/line-of-sight. WIDE* = высокая боковая скорость относительно линии на соперника. REPEEK* = смерть вскоре после собственного фрага рядом с предыдущей точкой/зоной.</div>';
 
   if (!hasData) return;
   const canvas = els.positionCanvas;
@@ -286,6 +290,17 @@ function renderPositioning() {
     ctx.beginPath(); ctx.arc(q.x,q.y,20,0,Math.PI*2); ctx.fill();
     ctx.fillStyle = '#ff6b75';
     ctx.beginPath(); ctx.arc(q.x,q.y,3.2,0,Math.PI*2); ctx.fill();
+
+    if (p.widePeekLike) {
+      ctx.strokeStyle = '#ffd166';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(q.x,q.y,8,0,Math.PI*2); ctx.stroke();
+    }
+    if (p.repeekLike) {
+      ctx.strokeStyle = '#d8b8ff';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.rect(q.x-7,q.y-7,14,14); ctx.stroke();
+    }
   }
 
   for (const p of drawKills) {
@@ -294,6 +309,11 @@ function renderPositioning() {
     ctx.beginPath(); ctx.arc(q.x,q.y,10,0,Math.PI*2); ctx.fill();
     ctx.fillStyle = '#6be7ff';
     ctx.beginPath(); ctx.arc(q.x,q.y,3,0,Math.PI*2); ctx.fill();
+    if (p.widePeekLike) {
+      ctx.strokeStyle = '#ffd166';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(q.x,q.y,7,0,Math.PI*2); ctx.stroke();
+    }
   }
 
   const topPlace = player.topDeathPlace;
@@ -316,7 +336,7 @@ async function runAI() {
   els.aiBtn.disabled = true;
   els.aiBtn.textContent = 'Анализирую…';
   els.aiOutput.classList.remove('muted');
-  els.aiOutput.textContent = `Локальная модель выбирает приоритеты V6 для ${p?.name || ''}…`;
+  els.aiOutput.textContent = `Локальная модель выбирает приоритеты V6.1 для ${p?.name || ''}…`;
   try {
     const response = await fetch('/api/ai', {
       method:'POST',
