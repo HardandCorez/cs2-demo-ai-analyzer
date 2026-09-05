@@ -1,13 +1,14 @@
 {
   "name": "hardandcore-cs2-demo-ai",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
-  "description": "CS2 demo analyzer with demoparser2 and OpenAI coaching",
+  "description": "CS2 demo analyzer with demoparser2 and local Ollama coaching",
   "scripts": {
     "start": "node src/server.js",
+    "start:ollama-gateway": "node src/ollama-gateway.js",
     "dev": "node --watch src/server.js",
-    "check": "node --check src/server.js && node --check public/app.js"
+    "check": "node --check src/server.js && node --check src/ollama-gateway.js && node --check public/app.js"
   },
   "engines": {
     "node": ">=20"
