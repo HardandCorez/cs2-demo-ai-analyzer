@@ -20,7 +20,7 @@ const port = Number(process.env.PORT || 3000);
 const maxDemoMb = Math.max(50, Number(process.env.MAX_DEMO_MB || 800));
 const aiGatewayUrl = String(process.env.AI_GATEWAY_URL || '').trim().replace(/\/+$/, '');
 const aiGatewayToken = String(process.env.AI_GATEWAY_TOKEN || '').trim();
-const aiTimeoutMs = Math.max(10_000, Number(process.env.AI_TIMEOUT_MS || 90_000));
+const aiTimeoutMs = Math.max(10_000, Number(process.env.AI_TIMEOUT_MS || 600_000));
 
 const app = express();
 app.disable('x-powered-by');
@@ -43,6 +43,8 @@ const asNumber = (value, fallback = 0) => {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
 };
+const fixed = (value, digits = 2) => Number(asNumber(value).toFixed(digits));
+const perRound = (value, rounds, digits = 2) => rounds > 0 ? fixed(asNumber(value) / rounds, digits) : 0;
 
 function cleanName(value) {
   return String(value ?? '').trim();
@@ -101,6 +103,24 @@ function buildEntryStats(deaths) {
   return byPlayer;
 }
 
+function addDerivedMetrics(player, rounds) {
+  const openingAttempts = asNumber(player.entryKills) + asNumber(player.openingDeaths);
+  return {
+    ...player,
+    rounds,
+    killsPerRound: perRound(player.kills, rounds),
+    deathsPerRound: perRound(player.deaths, rounds),
+    assistsPerRound: perRound(player.assists, rounds),
+    utilityDamagePerRound: perRound(player.utilityDamage, rounds, 1),
+    enemiesFlashedPerRound: perRound(player.enemiesFlashed, rounds, 2),
+    openingAttempts,
+    openingSuccessPct: openingAttempts > 0 ? Math.round((asNumber(player.entryKills) / openingAttempts) * 100) : null,
+    roundSurvivalPctEstimate: rounds > 0
+      ? Math.max(0, Math.min(100, Math.round(((rounds - asNumber(player.deaths)) / rounds) * 100)))
+      : null,
+  };
+}
+
 function aggregateStats(tickRows, playerInfo, rounds, deaths) {
   const infoById = new Map(playerInfo.map((p) => [String(p.steamid), p]));
   const infoByName = new Map(playerInfo.map((p) => [p.name, p]));
@@ -123,7 +143,7 @@ function aggregateStats(tickRows, playerInfo, rounds, deaths) {
     const flashed = asNumber(row.enemies_flashed_total);
     const entry = entries.get(name) || { entryKills: 0, openingDeaths: 0 };
 
-    seen.set(k, {
+    seen.set(k, addDerivedMetrics({
       steamid,
       name,
       teamNumber: asNumber(row.team_num ?? info?.teamNumber, 0),
@@ -141,10 +161,9 @@ function aggregateStats(tickRows, playerInfo, rounds, deaths) {
       entryKills: entry.entryKills,
       openingDeaths: entry.openingDeaths,
       impact: Number((kills * 1.0 + assists * 0.35 + entry.entryKills * 0.55 - deathsTotal * 0.52).toFixed(2)),
-    });
+    }, rounds));
   }
 
-  // Fallback: if aggregate tick props are unavailable, still build basic K/D/A from events.
   if (seen.size === 0) {
     for (const p of playerInfo) {
       seen.set(keyOfPlayer(p), {
@@ -170,10 +189,11 @@ function aggregateStats(tickRows, playerInfo, rounds, deaths) {
       if (victim) victim.deaths++;
       if (assister && assister !== attacker) assister.assists++;
     }
-    for (const p of seen.values()) {
+    for (const [key, p] of seen) {
       p.kd = p.deaths > 0 ? Number((p.kills / p.deaths).toFixed(2)) : p.kills;
       p.hsPct = p.kills > 0 ? Math.round((p.headshots / p.kills) * 100) : 0;
       p.impact = Number((p.kills + p.assists * 0.35 + p.entryKills * 0.55 - p.deaths * 0.52).toFixed(2));
+      seen.set(key, addDerivedMetrics(p, rounds));
     }
   }
 
@@ -233,7 +253,8 @@ async function parseDemo(filePath, originalName) {
     roundWinsBySide: roundSummary.wins,
     players,
     topPlayer: best,
-    timeline: deaths.slice(0, 160),
+    timeline: deaths.slice(0, 400),
+    timelineTruncated: deaths.length > 400,
     parser: '@laihoe/demoparser2',
   };
 }
@@ -268,22 +289,93 @@ app.post('/api/analyze', upload.single('demo'), async (req, res) => {
   }
 });
 
+function buildVerifiedMetrics(selected, rounds) {
+  if (!selected) return null;
+  const openingAttempts = asNumber(selected.entryKills) + asNumber(selected.openingDeaths);
+  return {
+    kills: asNumber(selected.kills),
+    deaths: asNumber(selected.deaths),
+    assists: asNumber(selected.assists),
+    kd: fixed(selected.kd, 2),
+    adr: fixed(selected.adr, 1),
+    headshots: asNumber(selected.headshots),
+    hsPct: asNumber(selected.hsPct),
+    damage: asNumber(selected.damage),
+    utilityDamage: asNumber(selected.utilityDamage),
+    enemiesFlashed: asNumber(selected.enemiesFlashed),
+    entryKills: asNumber(selected.entryKills),
+    openingDeaths: asNumber(selected.openingDeaths),
+    openingAttempts,
+    openingSuccessPct: openingAttempts > 0 ? Math.round((asNumber(selected.entryKills) / openingAttempts) * 100) : null,
+    killsPerRound: perRound(selected.kills, rounds),
+    deathsPerRound: perRound(selected.deaths, rounds),
+    assistsPerRound: perRound(selected.assists, rounds),
+    utilityDamagePerRound: perRound(selected.utilityDamage, rounds, 1),
+    enemiesFlashedPerRound: perRound(selected.enemiesFlashed, rounds, 2),
+    roundSurvivalPctEstimate: rounds > 0
+      ? Math.max(0, Math.min(100, Math.round(((rounds - asNumber(selected.deaths)) / rounds) * 100)))
+      : null,
+    customImpact: fixed(selected.impact, 2),
+  };
+}
+
 function compactMatchForAI(match, selectedSteamid) {
   const selected = match.players?.find((p) => String(p.steamid) === String(selectedSteamid))
     || match.players?.find((p) => p.name === selectedSteamid)
     || match.players?.[0];
 
-  const related = asArray(match.timeline)
-    .filter((e) => !selected || e.attacker === selected.name || e.victim === selected.name || e.assister === selected.name)
-    .slice(0, 45);
+  const allRelated = asArray(match.timeline)
+    .filter((e) => !selected || e.attacker === selected.name || e.victim === selected.name || e.assister === selected.name);
+  const related = allRelated.slice(0, 60);
 
   return {
     map: match.map,
     rounds: match.rounds,
     selectedPlayer: selected,
+    verifiedMetrics: buildVerifiedMetrics(selected, match.rounds),
+    metricDefinitions: {
+      kd: 'kills / deaths',
+      adr: 'total damage / match rounds',
+      hsPct: 'headshot kills / kills * 100',
+      enemiesFlashed: 'number of enemy flash effects registered by the parser; this is NOT the number of flashbangs thrown',
+      openingSuccessPct: 'entryKills / (entryKills + openingDeaths) * 100',
+      roundSurvivalPctEstimate: 'estimated from match rounds and deaths; valid for a normal full-match participant',
+      customImpact: 'project-specific heuristic, NOT HLTV Rating',
+    },
+    dataAvailability: {
+      killEvents: true,
+      exactRoundStartTiming: false,
+      reactionTime: false,
+      playerPositions: false,
+      tradeDetection: false,
+      clutchDetection: false,
+      economy: false,
+      kast: false,
+      flashbangsThrown: false,
+      utilityCoordinates: false,
+      sideSplitMetrics: false,
+      timelineTruncated: Boolean(match.timelineTruncated),
+      relatedKillEventsTruncated: allRelated.length > related.length,
+    },
     scoreboard: asArray(match.players).slice(0, 10),
     relatedKillEvents: related,
   };
+}
+
+function strictCoachInstructions() {
+  return [
+    'Ты CS2-аналитик. Работай как проверяющий статистику, а не как рассказчик.',
+    'Используй только verifiedMetrics, scoreboard, relatedKillEvents, metricDefinitions и dataAvailability.',
+    'Каждый конкретный вывод должен опираться на числовую метрику или конкретное событие раунда из входных данных.',
+    'Никогда не выдумывай время реакции, позиционирование, ранние/поздние смерти, трейды, клатчи, экономику, сторону T/CT или использование конкретных гранат, если dataAvailability говорит false.',
+    'enemiesFlashed означает зарегистрированные эффекты ослепления врагов, а не количество брошенных флешек.',
+    'customImpact — внутренний коэффициент проекта, не называй его HLTV Rating.',
+    'Не называй K/D 1.0+ низким без явного сравнительного контекста. K/D около 1.2+ обычно можно описывать как сильный индивидуальный результат, но помечай это как общую эвристику, а не абсолютную норму.',
+    'Высокий HS% сам по себе не доказывает хорошее принятие решений и не должен автоматически считаться главным плюсом.',
+    'Если метрика недоступна, прямо напиши: данных недостаточно для этого вывода.',
+    'Формат ответа: Оценка 0-100; Подтвержденные сильные стороны; Подтвержденные проблемы; Что нельзя заключить из этих данных; 5 действий на тренировку; Короткий вывод.',
+    'Для каждого пункта сильной стороны/проблемы укажи в скобках подтверждающие значения, например: K/D 1.38, ADR 100.7, opening 2/6 = 33%.',
+  ].join(' ');
 }
 
 function extractOutputText(data) {
@@ -306,14 +398,6 @@ async function callOpenAIDirect(payload) {
   }
 
   const model = process.env.OPENAI_MODEL || 'gpt-5.4-mini';
-  const instructions = [
-    'Ты тренер по Counter-Strike 2 и аналитик демок.',
-    'Отвечай по-русски, кратко и предметно.',
-    'Опирайся только на переданную статистику и события; не выдумывай позиции и тайминги, которых нет в данных.',
-    'Формат: оценка 0-100; 3 сильные стороны; 3 главные ошибки/риска; 5 конкретных действий на следующую тренировку; затем короткий вывод.',
-    'Если данных недостаточно для тактического вывода, прямо укажи это и предложи, какие метрики нужно добавить.',
-  ].join(' ');
-
   const apiResponse = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
     headers: {
@@ -322,8 +406,8 @@ async function callOpenAIDirect(payload) {
     },
     body: JSON.stringify({
       model,
-      instructions,
-      input: `Разбери эту CS2 демку для выбранного игрока:\n${JSON.stringify(payload)}`,
+      instructions: strictCoachInstructions(),
+      input: `Разбери матч только по подтвержденным данным:\n${JSON.stringify(payload)}`,
       max_output_tokens: 1400,
     }),
     signal: AbortSignal.timeout(aiTimeoutMs),
@@ -394,11 +478,14 @@ app.post('/api/ai', async (req, res) => {
     console.error(error);
     const status = Number(error?.status) || 502;
     const message = String(error?.message || error);
+    const localGateway = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?/i.test(aiGatewayUrl);
     const hint = mode === 'direct' && /country|region|territory not supported/i.test(message)
-      ? 'Прямой OpenAI-запрос отклонён по региону. Настрой AI_GATEWAY_URL на сервер, развернутый в поддерживаемой стране.'
-      : mode === 'gateway'
-        ? 'Проверь AI_GATEWAY_URL, AI_GATEWAY_TOKEN и переменные окружения удалённого gateway.'
-        : undefined;
+      ? 'Прямой OpenAI-запрос отклонён по региону.'
+      : mode === 'gateway' && localGateway
+        ? 'Проверь, что локальные Ollama и npm run start:ollama-gateway запущены, а AI_TIMEOUT_MS одинаковый в обоих процессах.'
+        : mode === 'gateway'
+          ? 'Проверь AI_GATEWAY_URL, AI_GATEWAY_TOKEN и переменные окружения gateway.'
+          : undefined;
     res.status(status).json({ error: message, hint });
   }
 });
