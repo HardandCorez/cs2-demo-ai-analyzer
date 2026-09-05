@@ -4,6 +4,16 @@ import {
   worldToRadarFraction,
 } from './radar-catalog.js';
 
+const $ = (selector) => document.querySelector(selector);
+const finite = (value) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+};
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (m) => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;',
+}[m]));
+
 const state = {
   match: null,
   meta: null,
@@ -36,27 +46,17 @@ window.fetch = async (...args) => {
       }).catch(() => {});
     }
   } catch {
-    // Never interfere with the main app fetch flow.
+    // Visual layer must never break the main parser flow.
   }
   return response;
 };
 
-const $ = (selector) => document.querySelector(selector);
-const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (m) => ({
-  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;',
-}[m]));
-const finite = (value) => {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-};
-const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
-
-function setupVisualCoachUi() {
+function setupUi() {
   const controls = $('.radar-controls');
   if (controls && !$('#visualCoachToggle')) {
     const label = document.createElement('label');
     label.className = 'radar-toggle visual-coach-toggle';
-    label.innerHTML = '<input id="visualCoachToggle" type="checkbox" checked /> визуальный coach';
+    label.innerHTML = '<input id="visualCoachToggle" type="checkbox" checked /> схема решения';
     const reset = $('#radarReset');
     controls.insertBefore(label, reset || null);
     label.querySelector('input')?.addEventListener('change', (event) => {
@@ -83,16 +83,11 @@ function setupVisualCoachUi() {
   }
 
   const legend = document.querySelector('.position-legend');
-  if (legend && !legend.querySelector('.coach-legend-stop')) {
-    const stop = document.createElement('span');
-    stop.innerHTML = '<i class="coach-legend-stop"></i> STOP/HOLD';
-    const route = document.createElement('span');
-    route.innerHTML = '<i class="coach-legend-route"></i> рекомендуемое действие';
-    const danger = document.createElement('span');
-    danger.innerHTML = '<i class="coach-legend-danger"></i> не форсить';
-    legend.insertBefore(stop, legend.lastElementChild);
-    legend.insertBefore(route, legend.lastElementChild);
-    legend.insertBefore(danger, legend.lastElementChild);
+  if (legend && !legend.querySelector('.coach-v74-legend')) {
+    const item = document.createElement('span');
+    item.className = 'coach-v74-legend';
+    item.innerHTML = '<i class="coach-v74-actual"></i> факт <i class="coach-v74-better"></i> лучше <i class="coach-v74-risk"></i> риск';
+    legend.insertBefore(item, legend.lastElementChild);
   }
 }
 
@@ -104,15 +99,14 @@ function selectedPlayer() {
 }
 
 function playerPositioning(player) {
-  if (!player?.name) return null;
-  return state.match?.positioning?.players?.[player.name] || null;
+  return player?.name ? state.match?.positioning?.players?.[player.name] || null : null;
 }
 
 function detailValue(label) {
-  const cells = [...document.querySelectorAll('#radarDetail .detail-cell')];
-  for (const cell of cells) {
-    const key = cell.querySelector('span')?.textContent?.trim();
-    if (key === label) return cell.querySelector('strong')?.textContent?.trim() || '';
+  for (const cell of [...document.querySelectorAll('#radarDetail .detail-cell')]) {
+    if (cell.querySelector('span')?.textContent?.trim() === label) {
+      return cell.querySelector('strong')?.textContent?.trim() || '';
+    }
   }
   return '';
 }
@@ -134,14 +128,9 @@ function syncSelectedDeathFromUi() {
   const round = Number(detailValue('Раунд'));
   const time = parseFloat(detailValue('Время'));
   const place = detailValue('Зона');
-  const weapon = detailValue('Оружие');
   let candidates = data.deaths.filter((p) => !Number.isFinite(round) || Number(p.round) === round);
   if (place && place !== '—') {
     const exact = candidates.filter((p) => String(p.place || '') === place);
-    if (exact.length) candidates = exact;
-  }
-  if (weapon && weapon !== '—') {
-    const exact = candidates.filter((p) => String(p.weapon || '') === weapon);
     if (exact.length) candidates = exact;
   }
   candidates.sort((a, b) => {
@@ -168,19 +157,11 @@ function closestTrajectoryPoint(trajectory, targetMinusSec) {
   const points = trajectory?.points || [];
   if (!points.length) return null;
   return points.reduce((best, point) => {
+    if (!best) return point;
     const delta = Math.abs(Number(point.tMinusSec || 0) - targetMinusSec);
-    const bestDelta = Math.abs(Number(best?.tMinusSec || 0) - targetMinusSec);
-    return !best || delta < bestDelta ? point : best;
+    const bestDelta = Math.abs(Number(best.tMinusSec || 0) - targetMinusSec);
+    return delta < bestDelta ? point : best;
   }, null);
-}
-
-function interpolateWorld(a, b, t) {
-  if (!a || !b) return null;
-  return {
-    x: Number(a.x) + (Number(b.x) - Number(a.x)) * t,
-    y: Number(a.y) + (Number(b.y) - Number(a.y)) * t,
-    z: Number(a.z || 0) + (Number(b.z || 0) - Number(a.z || 0)) * t,
-  };
 }
 
 function timelineEventForDeath() {
@@ -192,38 +173,25 @@ function coachPlan() {
   const death = state.selectedDeath;
   if (!state.enabled || !death) return null;
   const trajectory = selectedTrajectory();
-  const branch = closestTrajectoryPoint(trajectory, death.repeekLike ? 1.35 : 0.9)
+  const stopPoint = closestTrajectoryPoint(trajectory, death.repeekLike ? 1.3 : 0.85)
     || closestTrajectoryPoint(trajectory, 0.7)
     || trajectory?.points?.[0]
     || death;
-  const retreat = closestTrajectoryPoint(trajectory, 2.35)
+  const safePoint = closestTrajectoryPoint(trajectory, 2.5)
     || trajectory?.points?.[0]
-    || branch;
-  const info = interpolateWorld(branch, death, 0.28);
+    || stopPoint;
   const event = timelineEventForDeath();
   const attacker = event?.attackerPosition && finite(event.attackerPosition.x) !== null && finite(event.attackerPosition.y) !== null
     ? event.attackerPosition
     : null;
 
-  let mode = 'control';
-  let headline = 'Контролируемый контакт';
-  const notes = [];
-  if (death.repeekLike) {
-    mode = 'reset';
-    headline = 'После фрага — reset вместо автоматического repeek*';
-    notes.push('фиолетовая стрелка: уйти с прежней линии и удержать новую точку');
-  } else if (death.widePeekLike) {
-    mode = 'short-peek';
-    headline = 'Короткий info-peek вместо полного wide-swing*';
-    notes.push('жёлтый STOP: погасить боковую скорость до следующего решения');
-    notes.push('бирюзовый INFO → BACK: коротко открыть сектор и вернуться');
-  } else {
-    notes.push('жёлтый STOP: отделить движение от первого точного выстрела');
-    notes.push('бирюзовая стрелка: короткий контролируемый контакт вместо продолжения движения');
-  }
-  if (attacker) notes.push('розовый ENEMY*: позиция убийцы в момент события, если она доступна в parser snapshot');
-
-  return { death, trajectory, branch, retreat, info, attacker, mode, headline, notes };
+  const mode = death.repeekLike ? 'repeek' : death.widePeekLike ? 'wide' : 'control';
+  const headline = mode === 'repeek'
+    ? 'После фрага: остановиться и сменить линию'
+    : mode === 'wide'
+      ? 'Не продолжать широкий выход'
+      : 'Разделить движение и дуэль';
+  return { death, trajectory, stopPoint, safePoint, attacker, mode, headline };
 }
 
 function prepareOverlayCanvas() {
@@ -255,86 +223,95 @@ function applyView(x, y, width, height) {
 
 function projector(width, height) {
   if (state.meta?.available) {
-    const baseMapSize = Math.min(width - 18, height - 18);
-    const baseMapX = (width - baseMapSize) / 2;
-    const baseMapY = (height - baseMapSize) / 2;
+    const size = Math.min(width - 18, height - 18);
+    const x0 = (width - size) / 2;
+    const y0 = (height - size) / 2;
     return (p) => {
       const f = worldToRadarFraction(state.meta, p?.x, p?.y);
       if (!f || !Number.isFinite(f.fx) || !Number.isFinite(f.fy)) return null;
-      const baseX = baseMapX + f.fx * baseMapSize;
-      const baseY = baseMapY + f.fy * baseMapSize;
-      return applyView(baseX, baseY, width, height);
+      return applyView(x0 + f.fx * size, y0 + f.fy * size, width, height);
     };
   }
-
   const bounds = state.match?.positioning?.bounds;
   if (!bounds) return () => null;
   const pad = 34;
   const spanX = Math.max(1, Number(bounds.maxX) - Number(bounds.minX));
   const spanY = Math.max(1, Number(bounds.maxY) - Number(bounds.minY));
-  return (p) => {
-    const baseX = pad + ((Number(p.x) - Number(bounds.minX)) / spanX) * (width - pad * 2);
-    const baseY = height - pad - ((Number(p.y) - Number(bounds.minY)) / spanY) * (height - pad * 2);
-    return applyView(baseX, baseY, width, height);
-  };
+  return (p) => applyView(
+    pad + ((Number(p.x) - Number(bounds.minX)) / spanX) * (width - pad * 2),
+    height - pad - ((Number(p.y) - Number(bounds.minY)) / spanY) * (height - pad * 2),
+    width,
+    height,
+  );
 }
 
-function drawArrow(ctx, a, b, color, label, { dashed = false, width = 3 } = {}) {
+function drawPath(ctx, points, color, width, dashed = false, alpha = 1) {
+  if (points.length < 2) return;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.setLineDash(dashed ? [8, 7] : []);
+  ctx.beginPath();
+  points.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawArrow(ctx, a, b, color, width = 5) {
   if (!a || !b) return;
   const angle = Math.atan2(b.y - a.y, b.x - a.x);
-  const head = 9;
+  const head = 12;
   ctx.save();
   ctx.strokeStyle = color;
   ctx.fillStyle = color;
   ctx.lineWidth = width;
-  ctx.setLineDash(dashed ? [8, 6] : []);
+  ctx.lineCap = 'round';
   ctx.beginPath();
   ctx.moveTo(a.x, a.y);
   ctx.lineTo(b.x, b.y);
   ctx.stroke();
-  ctx.setLineDash([]);
   ctx.beginPath();
   ctx.moveTo(b.x, b.y);
   ctx.lineTo(b.x - head * Math.cos(angle - Math.PI / 6), b.y - head * Math.sin(angle - Math.PI / 6));
   ctx.lineTo(b.x - head * Math.cos(angle + Math.PI / 6), b.y - head * Math.sin(angle + Math.PI / 6));
   ctx.closePath();
   ctx.fill();
-  if (label) drawLabel(ctx, (a.x + b.x) / 2, (a.y + b.y) / 2 - 10, label, color);
   ctx.restore();
 }
 
-function drawLabel(ctx, x, y, text, color) {
-  ctx.save();
-  ctx.font = '700 10px system-ui';
-  const padX = 6;
-  const width = ctx.measureText(text).width + padX * 2;
-  const height = 20;
-  ctx.fillStyle = 'rgba(5,8,12,.88)';
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  if (ctx.roundRect) ctx.roundRect(x - width / 2, y - height / 2, width, height, 6);
-  else ctx.rect(x - width / 2, y - height / 2, width, height);
-  ctx.fill();
-  ctx.stroke();
-  ctx.fillStyle = color;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(text, x, y + 0.5);
-  ctx.restore();
-}
-
-function drawStop(ctx, q) {
+function drawNumberMarker(ctx, q, number, fill, stroke = '#ffffff') {
   if (!q) return;
   ctx.save();
-  ctx.strokeStyle = '#ffd166';
-  ctx.fillStyle = 'rgba(255,209,102,.13)';
-  ctx.lineWidth = 3;
+  ctx.fillStyle = fill;
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.arc(q.x, q.y, 13, 0, Math.PI * 2);
+  ctx.arc(q.x, q.y, 12, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
-  drawLabel(ctx, q.x, q.y - 23, 'STOP', '#ffd166');
+  ctx.fillStyle = '#061017';
+  ctx.font = '900 12px system-ui';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(String(number), q.x, q.y + 0.5);
+  ctx.restore();
+}
+
+function drawDeath(ctx, q) {
+  if (!q) return;
+  ctx.save();
+  ctx.strokeStyle = '#ff6675';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.arc(q.x, q.y, 13, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(q.x - 7, q.y - 7); ctx.lineTo(q.x + 7, q.y + 7);
+  ctx.moveTo(q.x + 7, q.y - 7); ctx.lineTo(q.x - 7, q.y + 7);
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -344,16 +321,21 @@ function drawEnemy(ctx, q) {
   ctx.translate(q.x, q.y);
   ctx.rotate(Math.PI / 4);
   ctx.fillStyle = '#ff82ca';
-  ctx.strokeStyle = '#fff';
-  ctx.lineWidth = 1.5;
-  ctx.fillRect(-5, -5, 10, 10);
-  ctx.strokeRect(-5, -5, 10, 10);
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 2;
+  ctx.fillRect(-7, -7, 14, 14);
+  ctx.strokeRect(-7, -7, 14, 14);
+  ctx.rotate(-Math.PI / 4);
+  ctx.fillStyle = '#1b0a17';
+  ctx.font = '900 9px system-ui';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('E', 0, 0.5);
   ctx.restore();
-  drawLabel(ctx, q.x, q.y - 18, 'ENEMY*', '#ff82ca');
 }
 
 function renderOverlay() {
-  setupVisualCoachUi();
+  setupUi();
   const prepared = prepareOverlayCanvas();
   if (!prepared) return;
   const { ctx, width, height } = prepared;
@@ -365,55 +347,37 @@ function renderOverlay() {
 
   const project = projector(width, height);
   const qDeath = project(plan.death);
-  const qBranch = project(plan.branch);
-  const qRetreat = project(plan.retreat);
-  const qInfo = project(plan.info);
-  const qAttacker = plan.attacker ? project(plan.attacker) : null;
-  if (!qDeath || !qBranch) return;
+  const qStop = project(plan.stopPoint);
+  let qSafe = project(plan.safePoint);
+  const qEnemy = plan.attacker ? project(plan.attacker) : null;
+  if (!qDeath || !qStop) return;
+
+  if (qSafe && Math.hypot(qSafe.x - qStop.x, qSafe.y - qStop.y) < 26 && plan.trajectory?.points?.length) {
+    qSafe = project(plan.trajectory.points[0]) || qSafe;
+  }
 
   ctx.save();
-  ctx.globalAlpha = 0.98;
+  ctx.fillStyle = 'rgba(2,5,8,.28)';
+  ctx.fillRect(0, 0, width, height);
 
-  // Duel line is factual geometry at the event tick when attacker coordinates exist.
-  if (qAttacker) {
-    ctx.strokeStyle = 'rgba(255,130,202,.7)';
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([4, 5]);
-    ctx.beginPath();
-    ctx.moveTo(qDeath.x, qDeath.y);
-    ctx.lineTo(qAttacker.x, qAttacker.y);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    drawEnemy(ctx, qAttacker);
+  const actual = (plan.trajectory?.points || []).map(project).filter(Boolean);
+  drawPath(ctx, actual, '#a7ff3f', 2.2, false, 0.58);
+  drawPath(ctx, [qStop, qDeath], '#ff6675', 3, true, 0.9);
+  if (qSafe) drawArrow(ctx, qStop, qSafe, '#5de7ff', 5.2);
+
+  if (qEnemy) {
+    drawPath(ctx, [qDeath, qEnemy], '#ff82ca', 1.5, true, 0.65);
+    drawEnemy(ctx, qEnemy);
   }
 
-  drawStop(ctx, qBranch);
-
-  if (plan.mode === 'reset') {
-    drawArrow(ctx, qBranch, qRetreat, '#c9a7ff', 'RESET / HOLD', { width: 3.2 });
-    drawArrow(ctx, qBranch, qDeath, '#ff6b75', 'НЕ REPEEK*', { dashed: true, width: 2.2 });
-  } else {
-    if (qInfo) {
-      drawArrow(ctx, qBranch, qInfo, '#56e6ff', 'INFO', { width: 3.1 });
-      drawArrow(ctx, qInfo, qBranch, '#56e6ff', 'BACK', { dashed: true, width: 2.3 });
-      drawArrow(ctx, qInfo, qDeath, '#ff6b75', 'НЕ ФОРСИТЬ', { dashed: true, width: 2.2 });
-    }
-  }
-
-  ctx.strokeStyle = '#ff6b75';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(qDeath.x - 7, qDeath.y - 7);
-  ctx.lineTo(qDeath.x + 7, qDeath.y + 7);
-  ctx.moveTo(qDeath.x + 7, qDeath.y - 7);
-  ctx.lineTo(qDeath.x - 7, qDeath.y + 7);
-  ctx.stroke();
-  drawLabel(ctx, qDeath.x, qDeath.y + 22, 'DEATH', '#ff6b75');
+  drawNumberMarker(ctx, qStop, 1, '#ffd166');
+  if (qSafe) drawNumberMarker(ctx, qSafe, 2, '#5de7ff');
+  drawDeath(ctx, qDeath);
   ctx.restore();
 }
 
 function renderCoachCard() {
-  setupVisualCoachUi();
+  setupUi();
   const card = $('#visualCoachCard');
   if (!card) return;
   const plan = coachPlan();
@@ -422,16 +386,29 @@ function renderCoachCard() {
     card.innerHTML = '';
     return;
   }
-  const flags = [plan.death.widePeekLike ? 'WIDE*' : '', plan.death.repeekLike ? 'REPEEK*' : ''].filter(Boolean).join(' + ') || 'контроль контакта';
+
+  const flag = plan.mode === 'repeek' ? 'REPEEK*' : plan.mode === 'wide' ? 'WIDE*' : 'контакт';
+  const second = plan.mode === 'repeek'
+    ? 'Отойти на точку 2 / сменить линию. Не возвращаться сразу в тот же контакт.'
+    : plan.mode === 'wide'
+      ? 'Вернуться к точке 2 вместо продолжения широкого выхода. Новый пик — только после нового преимущества.'
+      : 'Сместиться на точку 2 и заново принять решение после полной остановки.';
+
   card.innerHTML = `
     <div class="visual-coach-head">
-      <div><span>VISUAL COACH V7.2</span><b>${esc(plan.headline)}</b></div>
-      <strong>R${esc(plan.death.round || '?')} · ${esc(flags)}</strong>
+      <div><span>V7.4 · СХЕМА РЕШЕНИЯ</span><b>${esc(plan.headline)}</b></div>
+      <strong>R${esc(plan.death.round || '?')} · ${esc(flag)}</strong>
     </div>
-    <div class="visual-coach-notes">
-      ${plan.notes.map((note) => `<div>• ${esc(note)}</div>`).join('')}
+    <div class="coach-compare">
+      <div class="coach-compare-row bad"><span>БЫЛО</span><b>зелёная траектория → красный пунктир → ✕ смерть</b></div>
+      <div class="coach-compare-row good"><span>ЛУЧШЕ</span><b>① STOP → бирюзовая стрелка → ② безопаснее</b></div>
     </div>
-    <div class="visual-coach-disclaimer">Схема показывает решение относительно реально измеренных координат и собственной траектории. Это не рассчитанный navmesh-маршрут и не утверждение, что конкретная стена/угол гарантированно безопасны.</div>`;
+    <div class="coach-steps">
+      <div><i>1</i><span>Остановить движение и не продолжать текущий пик.</span></div>
+      <div><i>2</i><span>${esc(second)}</span></div>
+      ${plan.attacker ? '<div><i class="enemy-step">E</i><span>Розовый ромб — позиция убийцы в момент события.</span></div>' : ''}
+    </div>
+    <div class="visual-coach-disclaimer">Это safe-default по измеренной траектории. Без navmesh/LOS схема не утверждает, что точка 2 гарантированно закрыта стеной.</div>`;
   card.classList.remove('hidden');
 }
 
@@ -495,40 +472,38 @@ function mirrorPointerUp(event) {
   if (!moved) setTimeout(syncSelectedDeathFromUi, 0);
 }
 
-function resetMirroredView() {
+function resetView() {
   state.view = { zoom: 1, panX: 0, panY: 0 };
   queueRender();
 }
 
 function bindEvents() {
-  setupVisualCoachUi();
+  setupUi();
   const canvas = $('#positionCanvas');
   canvas?.addEventListener('wheel', mirrorWheel, { passive: true, capture: true });
   canvas?.addEventListener('pointerdown', mirrorPointerDown, true);
   canvas?.addEventListener('pointermove', mirrorPointerMove, true);
   canvas?.addEventListener('pointerup', mirrorPointerUp, true);
   canvas?.addEventListener('pointercancel', mirrorPointerUp, true);
-  canvas?.addEventListener('dblclick', resetMirroredView, true);
-  $('#radarReset')?.addEventListener('click', resetMirroredView, true);
+  canvas?.addEventListener('dblclick', resetView, true);
+  $('#radarReset')?.addEventListener('click', resetView, true);
   $('#radarLayer')?.addEventListener('change', queueRender);
   $('#radarRound')?.addEventListener('change', queueRender);
   $('#positionMode')?.addEventListener('change', queueRender);
   $('#trajectoryToggle')?.addEventListener('change', queueRender);
   $('#scoreBody')?.addEventListener('click', () => {
     state.selectedDeath = null;
-    setTimeout(() => {
-      renderCoachCard();
-      queueRender();
-    }, 0);
+    setTimeout(() => { renderCoachCard(); queueRender(); }, 0);
   });
   window.addEventListener('resize', queueRender);
 
-  const observer = new MutationObserver(() => {
-    const detail = $('#radarDetail');
-    if (detail && !detail.classList.contains('hidden')) setTimeout(syncSelectedDeathFromUi, 0);
-  });
   const detail = $('#radarDetail');
-  if (detail) observer.observe(detail, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+  if (detail) {
+    const observer = new MutationObserver(() => {
+      if (!detail.classList.contains('hidden')) setTimeout(syncSelectedDeathFromUi, 0);
+    });
+    observer.observe(detail, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+  }
 }
 
 bindEvents();
