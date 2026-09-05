@@ -15,7 +15,7 @@
       <div class="brand-mark">HC</div>
       <div>
         <div class="brand-title">HardandCore Demo AI</div>
-        <div class="brand-sub">CS2 demo intelligence · V6.1</div>
+        <div class="brand-sub">CS2 demo intelligence · V7 Radar</div>
       </div>
     </div>
     <div class="status" id="healthStatus"><span class="dot"></span> Проверка сервера…</div>
@@ -24,13 +24,13 @@
   <main class="shell">
     <section class="hero">
       <div class="hero-copy">
-        <div class="eyebrow">REAL .DEM PARSER + LOCAL AI + POSITIONING V6.1</div>
+        <div class="eyebrow">REAL .DEM PARSER + LOCAL AI + REAL RADAR V7</div>
         <h1>Разбирай демки CS2<br><span>как аналитик команды.</span></h1>
-        <p>Загрузи полноценный <strong>.dem</strong>. Сайт считает K/D, ADR, opening, trades, KAST, multikills, clutch и timing, строит координатную heatmap и добавляет spacing, flash/facing context, wide-peek-like и post-kill repeek-like флаги.</p>
+        <p>Загрузи полноценный <strong>.dem</strong>. Сайт считает K/D, ADR, opening, trades, KAST, multikills, clutch и timing, добавляет V6.1 peek-эвристики и теперь рисует фраги/смерти прямо поверх настоящего радара карты.</p>
       </div>
       <div class="hero-kpis">
-        <div class="mini-card"><b>V6.1</b><span>peek heuristics</span></div>
-        <div class="mini-card"><b>KAST</b><span>trades</span></div>
+        <div class="mini-card"><b>V7</b><span>real radar</span></div>
+        <div class="mini-card"><b>V6.1</b><span>peek flags</span></div>
         <div class="mini-card"><b>AI</b><span>verified coach</span></div>
       </div>
     </section>
@@ -70,7 +70,7 @@
             <div class="eyebrow">SCOREBOARD</div>
             <h3>Игроки</h3>
           </div>
-          <div class="hint">Нажми на игрока → positioning + AI-разбор</div>
+          <div class="hint">Нажми на игрока → radar + AI-разбор</div>
         </div>
         <div class="table-wrap">
           <table>
@@ -85,20 +85,29 @@
       </div>
 
       <div class="panel positioning-panel">
-        <div class="panel-head">
+        <div class="panel-head radar-head">
           <div>
-            <div class="eyebrow">POSITIONING V6.1</div>
-            <h3>Координатный контекст и peek-флаги</h3>
+            <div class="eyebrow">REAL RADAR V7 · POSITIONING V6.1</div>
+            <h3>События прямо на карте</h3>
+            <div class="radar-status" id="radarStatus">Ищем radar для карты…</div>
           </div>
-          <select id="positionMode" aria-label="Режим positioning map">
-            <option value="both">Фраги + смерти</option>
-            <option value="deaths">Только смерти</option>
-            <option value="kills">Только фраги</option>
-          </select>
+          <div class="radar-controls">
+            <select id="radarLayer" aria-label="Этаж radar map">
+              <option value="all">Все уровни</option>
+            </select>
+            <select id="positionMode" aria-label="Режим positioning map">
+              <option value="both">Фраги + смерти</option>
+              <option value="deaths">Только смерти</option>
+              <option value="kills">Только фраги</option>
+              <option value="wide">Только WIDE*</option>
+              <option value="repeek">Только REPEEK*</option>
+            </select>
+          </div>
         </div>
         <div class="position-summary" id="positionSummary"></div>
-        <div class="position-canvas-wrap">
-          <canvas id="positionCanvas" aria-label="Координатная heatmap фрагов и смертей"></canvas>
+        <div class="position-canvas-wrap" id="positionCanvasWrap">
+          <canvas id="positionCanvas" aria-label="Radar map с фрагами, смертями и peek-флагами"></canvas>
+          <div class="position-tooltip hidden" id="positionTooltip"></div>
           <div class="position-empty hidden" id="positionEmpty">В этой демке координаты событий недоступны.</div>
         </div>
         <div class="position-legend">
@@ -106,7 +115,7 @@
           <span><i class="legend-dot kill-dot"></i> фраги</span>
           <span><i class="peek-legend-ring"></i> WIDE*</span>
           <span><i class="repeek-legend-box"></i> REPEEK*</span>
-          <span class="muted">* эвристика. Проекция нормализована по координатам событий; это не радар карты и она не знает стены/этажи/LOS.</span>
+          <span class="muted">V7 использует world → radar transform из overview карты. Для многоэтажных карт можно переключать уровень. Если radar недоступен, включается старая нормализованная проекция.</span>
         </div>
       </div>
 
@@ -137,7 +146,7 @@
     </section>
   </main>
 
-  <footer>HardandCore Demo AI · локальная обработка .dem + Ollama · V6.1 positioning + peek heuristics</footer>
+  <footer>HardandCore Demo AI · локальная обработка .dem + Ollama · V7 real radar + V6.1 peek heuristics</footer>
   <script type="module" src="/app.js"></script>
 </body>
 </html>
