@@ -16,6 +16,7 @@ const els = {
   selectedPlayer: $('#selectedPlayer'), aiBtn: $('#aiBtn'), aiOutput: $('#aiOutput'),
   positionMode: $('#positionMode'), positionCanvas: $('#positionCanvas'), positionSummary: $('#positionSummary'), positionEmpty: $('#positionEmpty'),
   radarLayer: $('#radarLayer'), radarStatus: $('#radarStatus'), positionTooltip: $('#positionTooltip'), positionCanvasWrap: $('#positionCanvasWrap'),
+  radarRound: $('#radarRound'), trajectoryToggle: $('#trajectoryToggle'), radarReset: $('#radarReset'), radarZoom: $('#radarZoom'), radarDetail: $('#radarDetail'),
 };
 
 let match = null;
@@ -24,6 +25,10 @@ let radarMeta = null;
 let radarLoadError = '';
 let positionRenderToken = 0;
 let radarHitPoints = [];
+let selectedRadarHit = null;
+let radarView = { zoom: 1, panX: 0, panY: 0 };
+let dragState = null;
+let dragRenderQueued = false;
 
 function esc(value) {
   return String(value ?? '').replace(/[&<>'"]/g, (m) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#039;', '"':'&quot;' }[m]));
@@ -32,6 +37,10 @@ function esc(value) {
 function fmt(value, suffix = '') {
   if (value === null || value === undefined || value === '') return '—';
   return `${value}${suffix}`;
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
 }
 
 function setError(message = '') {
@@ -46,13 +55,25 @@ function setProgress(percent, label) {
   els.progressLabel.textContent = label;
 }
 
+function updateZoomReadout() {
+  if (els.radarZoom) els.radarZoom.textContent = `${Math.round(radarView.zoom * 100)}%`;
+}
+
+function resetRadarView({ keepSelection = true } = {}) {
+  radarView = { zoom: 1, panX: 0, panY: 0 };
+  if (!keepSelection) selectedRadarHit = null;
+  updateZoomReadout();
+  renderRadarDetail();
+  if (match) renderPositioning();
+}
+
 async function checkHealth() {
   try {
     const r = await fetch('/api/health');
     const data = await r.json();
     els.health.classList.toggle('ok', !!data.ok);
     const aiLabel = data.aiMode === 'gateway' ? 'AI локально' : data.aiMode === 'direct' ? 'AI direct' : 'AI не настроен';
-    els.health.innerHTML = `<span class="dot"></span>${data.ok ? 'Парсер готов' : 'Ошибка сервера'} · ${aiLabel} · V7 Radar`;
+    els.health.innerHTML = `<span class="dot"></span>${data.ok ? 'Парсер готов' : 'Ошибка сервера'} · ${aiLabel} · V7.1`;
   } catch {
     els.health.innerHTML = '<span class="dot"></span>Сервер недоступен';
   }
@@ -65,11 +86,11 @@ function fakeProgressUntil(responsePromise) {
     pct = Math.min(88, pct + Math.max(1, (90 - pct) * 0.08));
     const label = pct < 30
       ? 'Загрузка демки…'
-      : pct < 62
+      : pct < 60
         ? 'Парсер читает события CS2…'
-        : pct < 80
-          ? 'Считаем V5 метрики…'
-          : 'Считаем V6.1 positioning + peek heuristics…';
+        : pct < 78
+          ? 'Считаем V5/V6.1 метрики…'
+          : 'Снимаем V7.1 траектории и positioning…';
     setProgress(pct, label);
   }, 300);
   return responsePromise.finally(() => clearInterval(timer));
@@ -93,7 +114,11 @@ async function analyzeFile(file) {
     selectedSteamid = data.players?.[0]?.steamid || data.players?.[0]?.name || null;
     radarMeta = null;
     radarLoadError = '';
+    selectedRadarHit = null;
+    radarView = { zoom: 1, panX: 0, panY: 0 };
+    updateZoomReadout();
     configureRadarLayers();
+    configureRadarRounds();
     renderMatch();
     loadRadarForMatch();
   } catch (error) {
@@ -116,10 +141,10 @@ async function loadRadarForMatch() {
     if (meta?.available) {
       const floors = meta.layers?.length > 1 ? ` · уровней ${meta.layers.length}` : '';
       els.radarStatus.className = 'radar-status ok';
-      els.radarStatus.textContent = `Real radar: ${meta.displayName} · overview ${meta.posX}/${meta.posY} · scale ${meta.scale}${floors} · каталог ${meta.catalogCount || '?'} карт`;
+      els.radarStatus.textContent = `Real radar: ${meta.displayName} · scale ${meta.scale}${floors} · каталог ${meta.catalogCount || '?'} карт`;
     } else {
       els.radarStatus.className = 'radar-status warn';
-      els.radarStatus.textContent = `${requestedMap}: radar/overview не найден в каталоге — показываем fallback-проекцию.`;
+      els.radarStatus.textContent = `${requestedMap}: radar/overview не найден — показываем fallback-проекцию.`;
     }
     renderPositioning();
   } catch (error) {
@@ -135,6 +160,7 @@ async function loadRadarForMatch() {
 
 function configureRadarLayers() {
   if (!els.radarLayer) return;
+  const previous = els.radarLayer.value || 'all';
   const layers = radarMeta?.available ? radarMeta.layers || [] : [];
   els.radarLayer.innerHTML = '<option value="all">Все уровни</option>' + layers.map((layer) => {
     const z = layer.minZ !== null || layer.maxZ !== null
@@ -142,8 +168,15 @@ function configureRadarLayers() {
       : '';
     return `<option value="${esc(layer.id)}">${esc(layer.label)}${esc(z)}</option>`;
   }).join('');
-  els.radarLayer.value = 'all';
+  els.radarLayer.value = layers.some((layer) => layer.id === previous) ? previous : 'all';
   els.radarLayer.disabled = !layers.length;
+}
+
+function configureRadarRounds() {
+  if (!els.radarRound) return;
+  els.radarRound.innerHTML = '<option value="all">Все раунды</option>' + Array.from({ length: Math.max(0, Number(match?.rounds) || 0) }, (_, i) =>
+    `<option value="${i + 1}">Раунд ${i + 1}</option>`).join('');
+  els.radarRound.value = 'all';
 }
 
 function renderMatch() {
@@ -153,8 +186,9 @@ function renderMatch() {
   els.matchBadges.innerHTML = [
     match.demoVersion && `<span class="badge">${esc(match.demoVersion)}</span>`,
     match.parser && `<span class="badge">${esc(match.parser)}</span>`,
-    '<span class="badge">V7 real radar</span>',
+    '<span class="badge">V7.1 interactive radar</span>',
     '<span class="badge">V6.1 peek heuristics</span>',
+    match.dataAvailability?.deathTrajectories ? '<span class="badge">3s trajectories</span>' : '<span class="badge">trajectory unavailable</span>',
     match.networkProtocol && `<span class="badge">protocol ${esc(match.networkProtocol)}</span>`,
   ].filter(Boolean).join('');
 
@@ -173,6 +207,7 @@ function renderMatch() {
   renderFilters();
   renderTimeline();
   renderSelectedPlayer();
+  renderRadarDetail();
   requestAnimationFrame(() => renderPositioning());
   els.results.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -190,8 +225,10 @@ function renderScoreboard() {
   }).join('');
   els.scoreBody.querySelectorAll('tr').forEach((row) => row.addEventListener('click', () => {
     selectedSteamid = row.dataset.id;
+    selectedRadarHit = null;
     renderScoreboard();
     renderSelectedPlayer();
+    renderRadarDetail();
     els.timelineFilter.value = selectedSteamid;
     renderTimeline();
     renderPositioning();
@@ -208,14 +245,24 @@ function playerById(id) {
   return (match.players || []).find((p) => String(p.steamid || p.name) === String(id));
 }
 
+function selectedEventTick() {
+  return Number(selectedRadarHit?.point?.tick || 0);
+}
+
 function renderTimeline() {
   const filter = els.timelineFilter.value;
   const player = filter === 'all' ? null : playerById(filter);
-  const rows = (match.timeline || []).filter((e) => !player || e.attacker === player.name || e.victim === player.name || e.assister === player.name || e.tradeOf === player.name);
+  const roundFilter = els.radarRound?.value || 'all';
+  const rows = (match.timeline || []).filter((e) => {
+    const playerMatches = !player || e.attacker === player.name || e.victim === player.name || e.assister === player.name || e.tradeOf === player.name;
+    const roundMatches = roundFilter === 'all' || Number(e.round) === Number(roundFilter);
+    return playerMatches && roundMatches;
+  });
   if (!rows.length) {
     els.timeline.innerHTML = '<div class="muted">События убийств не найдены.</div>';
     return;
   }
+  const activeTick = selectedEventTick();
   els.timeline.innerHTML = rows.map((e) => {
     const timing = Number.isFinite(Number(e.secondsIntoRound)) ? ` · ${Number(e.secondsIntoRound).toFixed(1)}с` : '';
     const trade = e.tradeKill ? '<span class="trade">TRADE</span>' : '';
@@ -223,7 +270,8 @@ function renderTimeline() {
     const repeek = e.repeekLike ? '<span class="repeek-flag">REPEEK*</span>' : '';
     const place = e.victimPlace ? `<span class="place"> · ${esc(e.victimPlace)}</span>` : '';
     const spacing = Number.isFinite(Number(e.nearestTeammateDistance)) ? `<span class="context"> · mate ${Math.round(e.nearestTeammateDistance)}u</span>` : '';
-    return `<div class="event">
+    const selected = activeTick && Number(e.tick) === activeTick ? ' selected-event' : '';
+    return `<div class="event${selected}" data-tick="${esc(e.tick)}" data-round="${esc(e.round)}">
       <div class="event-round">R${e.round || '?'}${timing}</div>
       <div class="event-main"><strong>${esc(e.attacker || 'world')}</strong> → <strong>${esc(e.victim || '?')}</strong>
         ${e.weapon ? `<span class="weapon"> · ${esc(e.weapon)}</span>` : ''}${e.headshot ? '<span class="hs">HS</span>' : ''}${trade}${wide}${repeek}${place}${spacing}
@@ -255,10 +303,12 @@ function renderSelectedPlayer() {
     p.topDeathPlace ? `top zone ${p.topDeathPlace}` : null,
   ].filter(Boolean).join(' · ');
 
+  const trajectoryCount = positioningForPlayer(p)?.deathTrajectories?.length || 0;
   els.selectedPlayer.innerHTML = `<strong>${esc(p.name)}</strong><br>
     <span class="muted">${p.kills}/${p.deaths}/${p.assists} · ADR ${p.adr} · HS ${p.hsPct}% · Entry ${p.entryKills}:${p.openingDeaths}</span>
     ${advanced ? `<br><span class="muted">${esc(advanced)}</span>` : ''}
-    ${v6 ? `<br><span class="v6-line">V6.1 · ${esc(v6)}</span>` : ''}`;
+    ${v6 ? `<br><span class="v6-line">V6.1 · ${esc(v6)}</span>` : ''}
+    <br><span class="v6-line">V7.1 · death trajectories ${trajectoryCount}</span>`;
   els.aiBtn.disabled = false;
   els.aiOutput.textContent = 'Готов к локальному AI-разбору V6.1.';
   els.aiOutput.classList.add('muted');
@@ -284,18 +334,20 @@ function normalizedBounds(points) {
 
 function filteredPositionPoints(data) {
   const mode = els.positionMode?.value || 'both';
+  const roundId = els.radarRound?.value || 'all';
+  const roundFilter = roundId === 'all' ? null : Number(roundId);
   const deaths = data?.deaths || [];
   const kills = data?.kills || [];
-  let drawDeaths = deaths;
-  let drawKills = kills;
+  let drawDeaths = roundFilter === null ? deaths : deaths.filter((p) => Number(p.round) === roundFilter);
+  let drawKills = roundFilter === null ? kills : kills.filter((p) => Number(p.round) === roundFilter);
 
   if (mode === 'deaths') drawKills = [];
   else if (mode === 'kills') drawDeaths = [];
   else if (mode === 'wide') {
-    drawDeaths = deaths.filter((p) => p.widePeekLike);
-    drawKills = kills.filter((p) => p.widePeekLike);
+    drawDeaths = drawDeaths.filter((p) => p.widePeekLike);
+    drawKills = drawKills.filter((p) => p.widePeekLike);
   } else if (mode === 'repeek') {
-    drawDeaths = deaths.filter((p) => p.repeekLike);
+    drawDeaths = drawDeaths.filter((p) => p.repeekLike);
     drawKills = [];
   }
 
@@ -304,10 +356,11 @@ function filteredPositionPoints(data) {
     drawDeaths = drawDeaths.filter((p) => pointBelongsToLayer(radarMeta, p, layerId));
     drawKills = drawKills.filter((p) => pointBelongsToLayer(radarMeta, p, layerId));
   }
-  return { drawDeaths, drawKills, deaths, kills, layerId };
+  return { drawDeaths, drawKills, deaths, kills, layerId, roundFilter };
 }
 
 function renderPositionSummary(player) {
+  const trajectory = match?.positioning?.trajectory;
   const chips = [
     ['coord deaths', player.positionSamples ?? 0],
     ['mate dist', player.avgNearestTeammateDistanceAtDeath == null ? '—' : `${Math.round(player.avgNearestTeammateDistanceAtDeath)}u`],
@@ -317,11 +370,11 @@ function renderPositionSummary(player) {
     ['wide kills*', player.widePeekLikeKillPct == null ? '—' : `${player.widePeekLikeKills}/${player.widePeekKillSamples} · ${player.widePeekLikeKillPct}%`],
     ['repeek*', player.repeekLikePct == null ? '—' : `${player.repeekLikeDeaths}/${player.repeekEligibleSamples} · ${player.repeekLikePct}%`],
     ['duel dist', player.avgDuelDistanceAtDeath == null ? '—' : `${Math.round(player.avgDuelDistanceAtDeath)}u`],
-    ['outside front*', player.attackerOutsideFrontPct == null ? '—' : `${player.attackerOutsideFrontPct}%`],
     ['top death zone', player.topDeathPlace || '—'],
+    ['trajectory', trajectory?.totalTrajectories ? `${trajectory.seconds}s · ${trajectory.tickRate} tick/s` : '—'],
   ];
   els.positionSummary.innerHTML = chips.map(([label, value]) => `<div class="position-chip"><span>${esc(label)}</span><b>${esc(value)}</b></div>`).join('') +
-    '<div class="position-disclaimer">* WIDE/REPEEK остаются эвристиками V6.1. V7 меняет только визуализацию: координаты теперь накладываются на настоящий radar карты.</div>';
+    '<div class="position-disclaimer">V7.1: колесо = zoom, drag = pan, клик = эпизод/траектория, фильтр = раунд. WIDE/REPEEK остаются эвристиками V6.1.</div>';
 }
 
 function prepareCanvas(realRadar) {
@@ -329,8 +382,8 @@ function prepareCanvas(realRadar) {
   const rect = canvas.getBoundingClientRect();
   const cssWidth = Math.max(320, Math.floor(rect.width || canvas.parentElement.clientWidth || 900));
   const cssHeight = realRadar
-    ? Math.max(440, Math.min(760, Math.floor(cssWidth * 0.72)))
-    : Math.max(360, Math.min(540, Math.floor(cssWidth * 0.52)));
+    ? Math.max(500, Math.min(820, Math.floor(cssWidth * 0.74)))
+    : Math.max(380, Math.min(560, Math.floor(cssWidth * 0.54)));
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   canvas.width = Math.floor(cssWidth * dpr);
   canvas.height = Math.floor(cssHeight * dpr);
@@ -341,8 +394,23 @@ function prepareCanvas(realRadar) {
   return { canvas, ctx, cssWidth, cssHeight };
 }
 
+function applyView(x, y, cssWidth, cssHeight) {
+  const cx = cssWidth / 2;
+  const cy = cssHeight / 2;
+  return {
+    x: cx + (x - cx) * radarView.zoom + radarView.panX,
+    y: cy + (y - cy) * radarView.zoom + radarView.panY,
+  };
+}
+
 function registerHitPoint(x, y, point, type, layerId = '') {
   radarHitPoints.push({ x, y, point, type, layerId });
+}
+
+function isSelected(point, type) {
+  return selectedRadarHit
+    && selectedRadarHit.type === type
+    && Number(selectedRadarHit.point?.tick) === Number(point?.tick);
 }
 
 function drawDeath(ctx, q, p, layerId = '') {
@@ -361,6 +429,10 @@ function drawDeath(ctx, q, p, layerId = '') {
     ctx.strokeStyle = '#d8b8ff'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.rect(q.x - 7, q.y - 7, 14, 14); ctx.stroke();
   }
+  if (isSelected(p, 'death')) {
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.arc(q.x, q.y, 12, 0, Math.PI * 2); ctx.stroke();
+  }
   registerHitPoint(q.x, q.y, p, 'death', layerId);
 }
 
@@ -373,7 +445,46 @@ function drawKill(ctx, q, p, layerId = '') {
     ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 1.8;
     ctx.beginPath(); ctx.arc(q.x, q.y, 7, 0, Math.PI * 2); ctx.stroke();
   }
+  if (isSelected(p, 'kill')) {
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.arc(q.x, q.y, 11, 0, Math.PI * 2); ctx.stroke();
+  }
   registerHitPoint(q.x, q.y, p, 'kill', layerId);
+}
+
+function selectedTrajectory(data) {
+  if (!els.trajectoryToggle?.checked || selectedRadarHit?.type !== 'death') return null;
+  const tick = Number(selectedRadarHit.point?.tick);
+  return (data?.deathTrajectories || []).find((trajectory) => Number(trajectory.deathTick) === tick) || null;
+}
+
+function drawTrajectory(ctx, trajectory, project, layerId) {
+  if (!trajectory?.points?.length) return;
+  let points = trajectory.points;
+  if (radarMeta?.available && layerId !== 'all') {
+    points = points.filter((point) => pointBelongsToLayer(radarMeta, point, layerId));
+  }
+  const projected = points.map(project).filter(Boolean);
+  if (projected.length < 2) return;
+
+  ctx.save();
+  ctx.strokeStyle = 'rgba(167,255,63,.92)';
+  ctx.lineWidth = 2.4;
+  ctx.shadowColor = 'rgba(167,255,63,.45)';
+  ctx.shadowBlur = 8;
+  ctx.beginPath();
+  projected.forEach((p, index) => {
+    if (index === 0) ctx.moveTo(p.x, p.y);
+    else ctx.lineTo(p.x, p.y);
+  });
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  for (let i = 0; i < projected.length; i += 1) {
+    const radius = i === projected.length - 1 ? 3.5 : 2;
+    ctx.fillStyle = i === projected.length - 1 ? '#ffffff' : '#a7ff3f';
+    ctx.beginPath(); ctx.arc(projected[i].x, projected[i].y, radius, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
 }
 
 function drawPoints(ctx, drawDeaths, drawKills, project) {
@@ -390,7 +501,7 @@ function drawPoints(ctx, drawDeaths, drawKills, project) {
   }
 }
 
-function drawFallbackProjection(player, drawDeaths, drawKills) {
+function drawFallbackProjection(player, data, drawDeaths, drawKills, layerId) {
   const points = [...drawDeaths, ...drawKills];
   const { ctx, cssWidth, cssHeight } = prepareCanvas(false);
   const bounds = normalizedBounds(points);
@@ -398,32 +509,34 @@ function drawFallbackProjection(player, drawDeaths, drawKills) {
   const pad = 34;
   const spanX = Math.max(1, Number(bounds.maxX) - Number(bounds.minX));
   const spanY = Math.max(1, Number(bounds.maxY) - Number(bounds.minY));
-  const project = (p) => ({
+  const baseProject = (p) => ({
     x: pad + ((Number(p.x) - Number(bounds.minX)) / spanX) * (cssWidth - pad * 2),
     y: cssHeight - pad - ((Number(p.y) - Number(bounds.minY)) / spanY) * (cssHeight - pad * 2),
   });
+  const project = (p) => {
+    const base = baseProject(p);
+    return { ...applyView(base.x, base.y, cssWidth, cssHeight), layerId: '' };
+  };
 
   ctx.fillStyle = '#0b0f14';
   ctx.fillRect(0, 0, cssWidth, cssHeight);
   ctx.strokeStyle = 'rgba(255,255,255,.06)';
   ctx.lineWidth = 1;
   for (let i = 1; i < 6; i += 1) {
-    const x = pad + (cssWidth - pad * 2) * (i / 6);
-    const y = pad + (cssHeight - pad * 2) * (i / 6);
-    ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, cssHeight - pad); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(cssWidth - pad, y); ctx.stroke();
+    const b1 = applyView(pad + (cssWidth - pad * 2) * (i / 6), pad, cssWidth, cssHeight);
+    const b2 = applyView(pad + (cssWidth - pad * 2) * (i / 6), cssHeight - pad, cssWidth, cssHeight);
+    ctx.beginPath(); ctx.moveTo(b1.x, b1.y); ctx.lineTo(b2.x, b2.y); ctx.stroke();
   }
+  const trajectory = selectedTrajectory(data);
+  if (trajectory) drawTrajectory(ctx, trajectory, project, layerId);
   drawPoints(ctx, drawDeaths, drawKills, project);
-
-  if (player?.topDeathPlace) {
-    ctx.font = '11px system-ui';
-    ctx.fillStyle = 'rgba(255,255,255,.55)';
-    ctx.fillText('Fallback projection · real radar unavailable', 14, cssHeight - 14);
-  }
+  ctx.font = '11px system-ui';
+  ctx.fillStyle = 'rgba(255,255,255,.55)';
+  ctx.fillText('Fallback projection · real radar unavailable', 14, cssHeight - 14);
   return true;
 }
 
-async function drawRealRadar(drawDeaths, drawKills, layerId, token) {
+async function drawRealRadar(data, drawDeaths, drawKills, layerId, token) {
   const meta = radarMeta;
   if (!meta?.available) return false;
   const backgroundLayer = layerId !== 'all'
@@ -441,28 +554,33 @@ async function drawRealRadar(drawDeaths, drawKills, layerId, token) {
   if (token !== positionRenderToken) return true;
 
   const { ctx, cssWidth, cssHeight } = prepareCanvas(true);
-  const mapSize = Math.min(cssWidth - 18, cssHeight - 18);
-  const mapX = (cssWidth - mapSize) / 2;
-  const mapY = (cssHeight - mapSize) / 2;
+  const baseMapSize = Math.min(cssWidth - 18, cssHeight - 18);
+  const baseMapX = (cssWidth - baseMapSize) / 2;
+  const baseMapY = (cssHeight - baseMapSize) / 2;
+  const center = applyView(baseMapX, baseMapY, cssWidth, cssHeight);
+  const mapSize = baseMapSize * radarView.zoom;
+
   ctx.fillStyle = '#070a0f';
   ctx.fillRect(0, 0, cssWidth, cssHeight);
-  ctx.drawImage(img, mapX, mapY, mapSize, mapSize);
+  ctx.drawImage(img, center.x, center.y, mapSize, mapSize);
   ctx.fillStyle = 'rgba(3,6,10,.14)';
-  ctx.fillRect(mapX, mapY, mapSize, mapSize);
+  ctx.fillRect(center.x, center.y, mapSize, mapSize);
   ctx.strokeStyle = 'rgba(255,255,255,.10)';
-  ctx.strokeRect(mapX + 0.5, mapY + 0.5, mapSize - 1, mapSize - 1);
+  ctx.strokeRect(center.x + 0.5, center.y + 0.5, mapSize - 1, mapSize - 1);
 
   const project = (p) => {
     const f = worldToRadarFraction(meta, p.x, p.y);
     if (!f || !Number.isFinite(f.fx) || !Number.isFinite(f.fy)) return null;
-    if (f.fx < -0.08 || f.fx > 1.08 || f.fy < -0.08 || f.fy > 1.08) return null;
+    if (f.fx < -0.15 || f.fx > 1.15 || f.fy < -0.15 || f.fy > 1.15) return null;
+    const baseX = baseMapX + f.fx * baseMapSize;
+    const baseY = baseMapY + f.fy * baseMapSize;
+    const q = applyView(baseX, baseY, cssWidth, cssHeight);
     const pointLayer = layerForZ(meta, p.z);
-    return {
-      x: mapX + f.fx * mapSize,
-      y: mapY + f.fy * mapSize,
-      layerId: pointLayer?.id || 'default',
-    };
+    return { x: q.x, y: q.y, layerId: pointLayer?.id || 'default' };
   };
+
+  const trajectory = selectedTrajectory(data);
+  if (trajectory) drawTrajectory(ctx, trajectory, project, layerId);
   drawPoints(ctx, drawDeaths, drawKills, project);
 
   ctx.font = '10px system-ui';
@@ -470,7 +588,7 @@ async function drawRealRadar(drawDeaths, drawKills, layerId, token) {
   const floorText = layerId === 'all' && meta.layers.length > 1
     ? `фон: ${backgroundLayer.label} · точки всех Z-уровней`
     : `уровень: ${backgroundLayer.label}`;
-  ctx.fillText(`${meta.displayName} · ${floorText}`, mapX + 8, mapY + mapSize - 9);
+  ctx.fillText(`${meta.displayName} · ${floorText} · zoom ${Math.round(radarView.zoom * 100)}%`, 12, cssHeight - 12);
   return true;
 }
 
@@ -490,18 +608,38 @@ async function renderPositioning() {
   const hasData = points.length > 0;
   els.positionEmpty.classList.toggle('hidden', hasData);
   els.positionCanvas.classList.toggle('hidden', !hasData);
-  if (!hasData) return;
+  if (!hasData) {
+    radarHitPoints = [];
+    return;
+  }
 
   let realDrawn = false;
-  if (radarMeta?.available) realDrawn = await drawRealRadar(drawDeaths, drawKills, layerId, token);
+  if (radarMeta?.available) realDrawn = await drawRealRadar(data, drawDeaths, drawKills, layerId, token);
   if (token !== positionRenderToken) return;
   if (!realDrawn) {
-    drawFallbackProjection(player, drawDeaths, drawKills);
+    drawFallbackProjection(player, data, drawDeaths, drawKills, layerId);
     if (radarLoadError && els.radarStatus) {
       els.radarStatus.className = 'radar-status warn';
       els.radarStatus.textContent = `Radar image не загрузился — fallback-проекция. ${radarLoadError}`;
     }
   }
+}
+
+function nearestHitAt(clientX, clientY, radius = 16) {
+  if (!radarHitPoints.length) return null;
+  const rect = els.positionCanvas.getBoundingClientRect();
+  const x = clientX - rect.left;
+  const y = clientY - rect.top;
+  let best = null;
+  let bestDistance = radius;
+  for (const hit of radarHitPoints) {
+    const d = Math.hypot(hit.x - x, hit.y - y);
+    if (d < bestDistance) {
+      best = hit;
+      bestDistance = d;
+    }
+  }
+  return best;
 }
 
 function tooltipHtml(hit) {
@@ -522,22 +660,44 @@ function tooltipHtml(hit) {
   return `<b>R${esc(p.round || '?')} · ${kind}${place}</b><br><span class="tt-muted">${timing}${hit.layerId ? ` · ${esc(hit.layerId)}` : ''}</span>${details ? `<br>${details}` : ''}${flags ? `<br>${flags}` : ''}`;
 }
 
-function handleRadarMouseMove(event) {
-  if (!radarHitPoints.length || !els.positionTooltip) return;
-  const rect = els.positionCanvas.getBoundingClientRect();
-  const x = event.clientX - rect.left;
-  const y = event.clientY - rect.top;
-  let best = null;
-  let bestDistance = 16;
-  for (const hit of radarHitPoints) {
-    const d = Math.hypot(hit.x - x, hit.y - y);
-    if (d < bestDistance) {
-      best = hit;
-      bestDistance = d;
-    }
+function renderRadarDetail() {
+  if (!els.radarDetail) return;
+  if (!selectedRadarHit) {
+    els.radarDetail.classList.add('hidden');
+    els.radarDetail.innerHTML = '';
+    return;
   }
-  if (!best) {
-    els.positionTooltip.classList.add('hidden');
+  const p = selectedRadarHit.point || {};
+  const player = playerById(selectedSteamid);
+  const data = positioningForPlayer(player);
+  const trajectory = selectedRadarHit.type === 'death'
+    ? (data?.deathTrajectories || []).find((item) => Number(item.deathTick) === Number(p.tick))
+    : null;
+  const kind = selectedRadarHit.type === 'death' ? 'Смерть' : 'Фраг';
+  const trajectoryText = trajectory
+    ? `${trajectory.points.length} samples · ~${match?.positioning?.trajectory?.seconds || 3}с до смерти`
+    : 'нет trajectory для этого события';
+  const cells = [
+    ['Раунд', p.round || '—'],
+    ['Время', Number.isFinite(Number(p.secondsIntoRound)) ? `${Number(p.secondsIntoRound).toFixed(1)}с` : '—'],
+    ['Зона', p.place || '—'],
+    ['Оружие', p.weapon || '—'],
+    ['Mate dist', Number.isFinite(Number(p.nearestTeammateDistance)) ? `${Math.round(Number(p.nearestTeammateDistance))}u` : '—'],
+    ['Speed', Number.isFinite(Number(p.velocity)) ? `${Math.round(Number(p.velocity))}u/s` : '—'],
+    ['WIDE*', p.widePeekLike ? 'да' : 'нет'],
+    ['REPEEK*', p.repeekLike ? 'да' : 'нет'],
+  ];
+  els.radarDetail.innerHTML = `<b>${kind} · R${esc(p.round || '?')}${p.place ? ` · ${esc(p.place)}` : ''}</b>
+    <div class="detail-grid">${cells.map(([label, value]) => `<div class="detail-cell"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join('')}</div>
+    <div class="radar-help">${esc(trajectoryText)}${trajectory ? ' · зелёная линия показывает sampled path перед смертью.' : ''}</div>`;
+  els.radarDetail.classList.remove('hidden');
+}
+
+function handleRadarMouseMove(event) {
+  if (dragState) return;
+  const best = nearestHitAt(event.clientX, event.clientY);
+  if (!best || !els.positionTooltip) {
+    els.positionTooltip?.classList.add('hidden');
     return;
   }
   els.positionTooltip.innerHTML = tooltipHtml(best);
@@ -549,6 +709,83 @@ function handleRadarMouseMove(event) {
   const top = localY > wrapRect.height * 0.72 ? Math.max(8, localY - 100) : localY + 14;
   els.positionTooltip.style.left = `${left}px`;
   els.positionTooltip.style.top = `${top}px`;
+}
+
+function scheduleRadarRender() {
+  if (dragRenderQueued) return;
+  dragRenderQueued = true;
+  requestAnimationFrame(() => {
+    dragRenderQueued = false;
+    renderPositioning();
+  });
+}
+
+function handleRadarWheel(event) {
+  event.preventDefault();
+  const rect = els.positionCanvas.getBoundingClientRect();
+  const mx = event.clientX - rect.left;
+  const my = event.clientY - rect.top;
+  const cx = rect.width / 2;
+  const cy = rect.height / 2;
+  const oldZoom = radarView.zoom;
+  const factor = event.deltaY < 0 ? 1.16 : 1 / 1.16;
+  const newZoom = clamp(oldZoom * factor, 0.75, 6);
+  const baseX = (mx - cx - radarView.panX) / oldZoom;
+  const baseY = (my - cy - radarView.panY) / oldZoom;
+  radarView.panX = mx - cx - baseX * newZoom;
+  radarView.panY = my - cy - baseY * newZoom;
+  radarView.zoom = newZoom;
+  updateZoomReadout();
+  scheduleRadarRender();
+}
+
+function handlePointerDown(event) {
+  if (event.button !== 0) return;
+  dragState = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    originPanX: radarView.panX,
+    originPanY: radarView.panY,
+    moved: false,
+  };
+  els.positionCanvas.setPointerCapture?.(event.pointerId);
+  els.positionCanvas.classList.add('dragging');
+  els.positionTooltip?.classList.add('hidden');
+}
+
+function handlePointerMove(event) {
+  if (!dragState || dragState.pointerId !== event.pointerId) {
+    handleRadarMouseMove(event);
+    return;
+  }
+  const dx = event.clientX - dragState.startX;
+  const dy = event.clientY - dragState.startY;
+  if (Math.hypot(dx, dy) > 3) dragState.moved = true;
+  if (!dragState.moved) return;
+  radarView.panX = dragState.originPanX + dx;
+  radarView.panY = dragState.originPanY + dy;
+  scheduleRadarRender();
+}
+
+function handlePointerUp(event) {
+  if (!dragState || dragState.pointerId !== event.pointerId) return;
+  const moved = dragState.moved;
+  dragState = null;
+  els.positionCanvas.classList.remove('dragging');
+  els.positionCanvas.releasePointerCapture?.(event.pointerId);
+  if (!moved) {
+    const hit = nearestHitAt(event.clientX, event.clientY, 18);
+    if (hit) {
+      selectedRadarHit = hit;
+      if (els.radarRound?.value !== 'all' && Number(els.radarRound.value) !== Number(hit.point?.round)) {
+        els.radarRound.value = String(hit.point?.round || 'all');
+      }
+      renderRadarDetail();
+      renderTimeline();
+      renderPositioning();
+    }
+  }
 }
 
 async function runAI() {
@@ -585,9 +822,18 @@ els.drop.addEventListener('drop', (e) => { e.preventDefault(); els.drop.classLis
 els.timelineFilter.addEventListener('change', renderTimeline);
 els.positionMode?.addEventListener('change', renderPositioning);
 els.radarLayer?.addEventListener('change', renderPositioning);
-els.positionCanvas?.addEventListener('mousemove', handleRadarMouseMove);
-els.positionCanvas?.addEventListener('mouseleave', () => els.positionTooltip?.classList.add('hidden'));
+els.radarRound?.addEventListener('change', () => { renderTimeline(); renderPositioning(); });
+els.trajectoryToggle?.addEventListener('change', renderPositioning);
+els.radarReset?.addEventListener('click', () => resetRadarView());
+els.positionCanvas?.addEventListener('wheel', handleRadarWheel, { passive: false });
+els.positionCanvas?.addEventListener('pointerdown', handlePointerDown);
+els.positionCanvas?.addEventListener('pointermove', handlePointerMove);
+els.positionCanvas?.addEventListener('pointerup', handlePointerUp);
+els.positionCanvas?.addEventListener('pointercancel', handlePointerUp);
+els.positionCanvas?.addEventListener('mouseleave', () => { if (!dragState) els.positionTooltip?.classList.add('hidden'); });
+els.positionCanvas?.addEventListener('dblclick', () => resetRadarView());
 els.aiBtn.addEventListener('click', runAI);
 window.addEventListener('resize', () => { if (match) requestAnimationFrame(() => renderPositioning()); });
 
+updateZoomReadout();
 checkHealth();
