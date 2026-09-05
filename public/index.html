@@ -7,6 +7,7 @@
   <title>HardandCore Demo AI — анализ демок CS2</title>
   <link rel="stylesheet" href="/styles.css" />
   <link rel="stylesheet" href="/v61.css" />
+  <link rel="stylesheet" href="/v71.css" />
 </head>
 <body>
   <div class="noise"></div>
@@ -15,7 +16,7 @@
       <div class="brand-mark">HC</div>
       <div>
         <div class="brand-title">HardandCore Demo AI</div>
-        <div class="brand-sub">CS2 demo intelligence · V7 Radar</div>
+        <div class="brand-sub">CS2 demo intelligence · V7.1 Interactive Radar</div>
       </div>
     </div>
     <div class="status" id="healthStatus"><span class="dot"></span> Проверка сервера…</div>
@@ -24,13 +25,13 @@
   <main class="shell">
     <section class="hero">
       <div class="hero-copy">
-        <div class="eyebrow">REAL .DEM PARSER + LOCAL AI + REAL RADAR V7</div>
+        <div class="eyebrow">REAL .DEM PARSER + LOCAL AI + INTERACTIVE RADAR V7.1</div>
         <h1>Разбирай демки CS2<br><span>как аналитик команды.</span></h1>
-        <p>Загрузи полноценный <strong>.dem</strong>. Сайт считает K/D, ADR, opening, trades, KAST, multikills, clutch и timing, добавляет V6.1 peek-эвристики и теперь рисует фраги/смерти прямо поверх настоящего радара карты.</p>
+        <p>Загрузи полноценный <strong>.dem</strong>. Сайт считает K/D, ADR, opening, trades, KAST, multikills, clutch и timing, добавляет V6.1 peek-эвристики и рисует события на настоящем radar. V7.1 добавляет zoom/pan, клики, фильтр раундов и траекторию игрока перед смертью.</p>
       </div>
       <div class="hero-kpis">
-        <div class="mini-card"><b>V7</b><span>real radar</span></div>
-        <div class="mini-card"><b>V6.1</b><span>peek flags</span></div>
+        <div class="mini-card"><b>V7.1</b><span>interactive radar</span></div>
+        <div class="mini-card"><b>3s</b><span>death trajectory</span></div>
         <div class="mini-card"><b>AI</b><span>verified coach</span></div>
       </div>
     </section>
@@ -87,11 +88,14 @@
       <div class="panel positioning-panel">
         <div class="panel-head radar-head">
           <div>
-            <div class="eyebrow">REAL RADAR V7 · POSITIONING V6.1</div>
-            <h3>События прямо на карте</h3>
+            <div class="eyebrow">REAL RADAR V7.1 · POSITIONING V6.1</div>
+            <h3>Интерактивная карта событий</h3>
             <div class="radar-status" id="radarStatus">Ищем radar для карты…</div>
           </div>
           <div class="radar-controls">
+            <select id="radarRound" aria-label="Фильтр по раунду">
+              <option value="all">Все раунды</option>
+            </select>
             <select id="radarLayer" aria-label="Этаж radar map">
               <option value="all">Все уровни</option>
             </select>
@@ -102,20 +106,26 @@
               <option value="wide">Только WIDE*</option>
               <option value="repeek">Только REPEEK*</option>
             </select>
+            <label class="radar-toggle"><input id="trajectoryToggle" type="checkbox" checked /> траектория 3с</label>
+            <button class="ghost-btn" id="radarReset" type="button">Сброс вида</button>
+            <span class="zoom-readout" id="radarZoom">100%</span>
           </div>
         </div>
         <div class="position-summary" id="positionSummary"></div>
         <div class="position-canvas-wrap" id="positionCanvasWrap">
-          <canvas id="positionCanvas" aria-label="Radar map с фрагами, смертями и peek-флагами"></canvas>
+          <canvas id="positionCanvas" aria-label="Интерактивный radar map с фрагами, смертями и peek-флагами"></canvas>
           <div class="position-tooltip hidden" id="positionTooltip"></div>
           <div class="position-empty hidden" id="positionEmpty">В этой демке координаты событий недоступны.</div>
         </div>
+        <div class="radar-detail hidden" id="radarDetail"></div>
+        <div class="radar-help">Колесо мыши — zoom · зажми ЛКМ и тащи — pan · клик по точке — закрепить эпизод и показать траекторию перед смертью · двойной клик — сброс вида.</div>
         <div class="position-legend">
           <span><i class="legend-dot death-dot"></i> смерти</span>
           <span><i class="legend-dot kill-dot"></i> фраги</span>
           <span><i class="peek-legend-ring"></i> WIDE*</span>
           <span><i class="repeek-legend-box"></i> REPEEK*</span>
-          <span class="muted">V7 использует world → radar transform из overview карты. Для многоэтажных карт можно переключать уровень. Если radar недоступен, включается старая нормализованная проекция.</span>
+          <span><i class="traj-legend-line"></i> траектория перед смертью</span>
+          <span class="muted">V7.1 использует world → radar transform из overview карты. WIDE/REPEEK остаются эвристиками V6.1.</span>
         </div>
       </div>
 
@@ -146,7 +156,7 @@
     </section>
   </main>
 
-  <footer>HardandCore Demo AI · локальная обработка .dem + Ollama · V7 real radar + V6.1 peek heuristics</footer>
+  <footer>HardandCore Demo AI · локальная обработка .dem + Ollama · V7.1 interactive radar + V6.1 peek heuristics</footer>
   <script type="module" src="/app.js"></script>
 </body>
 </html>
