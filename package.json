@@ -1,9 +1,9 @@
 {
   "name": "hardandcore-cs2-demo-ai",
-  "version": "1.7.1",
+  "version": "1.8.0",
   "private": true,
   "type": "module",
-  "description": "CS2 demo analyzer with V7.3 visual coaching overlays, manual radar zoom controls, V7.1 interactive real radar, prescriptive V6.2 coaching and local Ollama",
+  "description": "CS2 demo analyzer with V7.4 simplified visual coaching, manual radar zoom controls, V7.1 interactive real radar, prescriptive V6.2 coaching and local Ollama",
   "scripts": {
     "start": "node src/server-v71.js",
     "start:ollama-gateway": "node src/ollama-gateway-v62.js",
