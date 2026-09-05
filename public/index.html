@@ -14,7 +14,7 @@
       <div class="brand-mark">HC</div>
       <div>
         <div class="brand-title">HardandCore Demo AI</div>
-        <div class="brand-sub">CS2 demo intelligence</div>
+        <div class="brand-sub">CS2 demo intelligence · V6</div>
       </div>
     </div>
     <div class="status" id="healthStatus"><span class="dot"></span> Проверка сервера…</div>
@@ -23,14 +23,14 @@
   <main class="shell">
     <section class="hero">
       <div class="hero-copy">
-        <div class="eyebrow">REAL .DEM PARSER + LOCAL AI</div>
+        <div class="eyebrow">REAL .DEM PARSER + LOCAL AI + POSITIONING V6</div>
         <h1>Разбирай демки CS2<br><span>как аналитик команды.</span></h1>
-        <p>Загрузи полноценный <strong>.dem</strong>. Сайт извлечёт статистику игроков, opening-duels, хедшоты, ADR, utility и события убийств, а затем даст локальный AI-разбор выбранного игрока только по подтверждённым данным.</p>
+        <p>Загрузи полноценный <strong>.dem</strong>. Сайт считает K/D, ADR, opening, trades, KAST, multikills, clutch, timing и теперь добавляет координатный контекст смертей: spacing, скорость, flash state, направление взгляда и heatmap.</p>
       </div>
       <div class="hero-kpis">
-        <div class="mini-card"><b>10</b><span>игроков</span></div>
-        <div class="mini-card"><b>400</b><span>событий</span></div>
-        <div class="mini-card"><b>AI</b><span>коучинг</span></div>
+        <div class="mini-card"><b>V6</b><span>positioning</span></div>
+        <div class="mini-card"><b>KAST</b><span>trades</span></div>
+        <div class="mini-card"><b>AI</b><span>verified coach</span></div>
       </div>
     </section>
 
@@ -69,17 +69,41 @@
             <div class="eyebrow">SCOREBOARD</div>
             <h3>Игроки</h3>
           </div>
-          <div class="hint">Нажми на игрока → затем «AI-разбор»</div>
+          <div class="hint">Нажми на игрока → positioning + AI-разбор</div>
         </div>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>#</th><th>Игрок</th><th>K</th><th>D</th><th>A</th><th>K/D</th><th>ADR</th><th>HS%</th><th>Entry</th><th>Open D</th><th>Util</th>
+                <th>#</th><th>Игрок</th><th>K</th><th>D</th><th>A</th><th>K/D</th><th>ADR</th><th>HS%</th><th>KAST</th><th>Trades</th><th>Entry</th><th>Open D</th>
               </tr>
             </thead>
             <tbody id="scoreBody"></tbody>
           </table>
+        </div>
+      </div>
+
+      <div class="panel positioning-panel">
+        <div class="panel-head">
+          <div>
+            <div class="eyebrow">POSITIONING V6</div>
+            <h3>Координатный контекст</h3>
+          </div>
+          <select id="positionMode" aria-label="Режим positioning map">
+            <option value="both">Фраги + смерти</option>
+            <option value="deaths">Только смерти</option>
+            <option value="kills">Только фраги</option>
+          </select>
+        </div>
+        <div class="position-summary" id="positionSummary"></div>
+        <div class="position-canvas-wrap">
+          <canvas id="positionCanvas" aria-label="Координатная heatmap фрагов и смертей"></canvas>
+          <div class="position-empty hidden" id="positionEmpty">В этой демке координаты событий недоступны.</div>
+        </div>
+        <div class="position-legend">
+          <span><i class="legend-dot death-dot"></i> смерти</span>
+          <span><i class="legend-dot kill-dot"></i> фраги</span>
+          <span class="muted">Проекция нормализована по координатам событий; это не радар карты и она не знает стены/этажи.</span>
         </div>
       </div>
 
@@ -98,19 +122,19 @@
         <div class="panel ai-panel">
           <div class="panel-head">
             <div>
-              <div class="eyebrow">LOCAL VERIFIED COACH</div>
+              <div class="eyebrow">LOCAL VERIFIED COACH · V6</div>
               <h3>AI-разбор</h3>
             </div>
           </div>
           <div class="selected-player" id="selectedPlayer">Выбери игрока в таблице</div>
           <button class="primary full" id="aiBtn" type="button" disabled>Запустить AI-анализ</button>
-          <div class="ai-output muted" id="aiOutput">Здесь появятся только подтверждённые сильные стороны, проблемы и план тренировки.</div>
+          <div class="ai-output muted" id="aiOutput">Здесь появятся только подтверждённые метрики и осторожные positioning-эвристики.</div>
         </div>
       </div>
     </section>
   </main>
 
-  <footer>HardandCore Demo AI · локальная обработка .dem + Ollama · verified metrics mode</footer>
+  <footer>HardandCore Demo AI · локальная обработка .dem + Ollama · V6 positioning context</footer>
   <script type="module" src="/app.js"></script>
 </body>
 </html>
