@@ -1,0 +1,35 @@
+.peek-flag,
+.repeek-flag {
+  display:inline-block;
+  margin-left:6px;
+  padding:2px 6px;
+  border-radius:6px;
+  font-size:9px;
+  font-weight:900;
+  letter-spacing:.04em;
+}
+.peek-flag {
+  color:#1b1400;
+  background:#ffd166;
+  border:1px solid rgba(255,209,102,.35);
+}
+.repeek-flag {
+  color:#150b22;
+  background:#d8b8ff;
+  border:1px solid rgba(216,184,255,.35);
+}
+.peek-legend-ring,
+.repeek-legend-box {
+  display:inline-block;
+  width:10px;
+  height:10px;
+  margin-right:6px;
+  vertical-align:-1px;
+}
+.peek-legend-ring {
+  border:2px solid #ffd166;
+  border-radius:50%;
+}
+.repeek-legend-box {
+  border:2px solid #d8b8ff;
+}
