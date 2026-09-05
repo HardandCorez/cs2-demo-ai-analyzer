@@ -1,0 +1,417 @@
+import 'dotenv/config';
+import express from 'express';
+import multer from 'multer';
+import path from 'node:path';
+import os from 'node:os';
+import fs from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import {
+  parseEvent,
+  parseHeader,
+  parsePlayerInfo,
+  parseTicks,
+} from '@laihoe/demoparser2';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const rootDir = path.resolve(__dirname, '..');
+const publicDir = path.join(rootDir, 'public');
+const port = Number(process.env.PORT || 3000);
+const maxDemoMb = Math.max(50, Number(process.env.MAX_DEMO_MB || 800));
+const aiGatewayUrl = String(process.env.AI_GATEWAY_URL || '').trim().replace(/\/+$/, '');
+const aiGatewayToken = String(process.env.AI_GATEWAY_TOKEN || '').trim();
+const aiTimeoutMs = Math.max(10_000, Number(process.env.AI_TIMEOUT_MS || 90_000));
+
+const app = express();
+app.disable('x-powered-by');
+app.use(express.json({ limit: '2mb' }));
+app.use(express.static(publicDir));
+
+const upload = multer({
+  dest: os.tmpdir(),
+  limits: { fileSize: maxDemoMb * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (path.extname(file.originalname).toLowerCase() !== '.dem') {
+      return cb(new Error('Можно загружать только файлы .dem'));
+    }
+    cb(null, true);
+  },
+});
+
+const asArray = (value) => (Array.isArray(value) ? value : []);
+const asNumber = (value, fallback = 0) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+};
+
+function cleanName(value) {
+  return String(value ?? '').trim();
+}
+
+function keyOfPlayer(row) {
+  return String(row?.steamid ?? row?.steam_id ?? row?.player_steamid ?? row?.name ?? '');
+}
+
+function normalizePlayerInfo(rows) {
+  return asArray(rows).map((row) => ({
+    steamid: String(row.steamid ?? row.steam_id ?? ''),
+    name: cleanName(row.name ?? row.player_name ?? 'Unknown'),
+    teamNumber: asNumber(row.team_number ?? row.team_num, 0),
+  })).filter((p) => p.steamid || p.name !== 'Unknown');
+}
+
+function pick(row, ...keys) {
+  for (const key of keys) {
+    if (row?.[key] !== undefined && row?.[key] !== null && row?.[key] !== '') return row[key];
+  }
+  return undefined;
+}
+
+function normalizeDeaths(rows) {
+  return asArray(rows).map((row) => ({
+    tick: asNumber(pick(row, 'tick')),
+    round: asNumber(pick(row, 'total_rounds_played', 'round', 'round_number')) + 1,
+    attacker: cleanName(pick(row, 'attacker_name', 'attacker_player_name', 'attacker')),
+    attackerSteamid: String(pick(row, 'attacker_steamid', 'attacker_steam_id') ?? ''),
+    victim: cleanName(pick(row, 'user_name', 'victim_name', 'player_name', 'victim')),
+    victimSteamid: String(pick(row, 'user_steamid', 'victim_steamid', 'player_steamid') ?? ''),
+    assister: cleanName(pick(row, 'assister_name', 'assister')),
+    weapon: cleanName(pick(row, 'weapon', 'weapon_name')).replace(/^weapon_/, ''),
+    headshot: Boolean(pick(row, 'headshot', 'is_headshot')),
+    penetrated: asNumber(pick(row, 'penetrated', 'penetrated_objects')),
+  })).filter((e) => e.attacker || e.victim || e.weapon);
+}
+
+function buildEntryStats(deaths) {
+  const byPlayer = new Map();
+  const byRound = new Map();
+  for (const death of deaths) {
+    if (!byRound.has(death.round)) byRound.set(death.round, []);
+    byRound.get(death.round).push(death);
+  }
+  for (const roundEvents of byRound.values()) {
+    roundEvents.sort((a, b) => a.tick - b.tick);
+    const first = roundEvents.find((e) => e.attacker && e.victim && e.attacker !== e.victim);
+    if (!first) continue;
+    if (!byPlayer.has(first.attacker)) byPlayer.set(first.attacker, { entryKills: 0, openingDeaths: 0 });
+    if (!byPlayer.has(first.victim)) byPlayer.set(first.victim, { entryKills: 0, openingDeaths: 0 });
+    byPlayer.get(first.attacker).entryKills += 1;
+    byPlayer.get(first.victim).openingDeaths += 1;
+  }
+  return byPlayer;
+}
+
+function aggregateStats(tickRows, playerInfo, rounds, deaths) {
+  const infoById = new Map(playerInfo.map((p) => [String(p.steamid), p]));
+  const infoByName = new Map(playerInfo.map((p) => [p.name, p]));
+  const entries = buildEntryStats(deaths);
+  const seen = new Map();
+
+  for (const row of asArray(tickRows)) {
+    const steamid = String(row.steamid ?? row.player_steamid ?? '');
+    const name = cleanName(row.name ?? row.player_name ?? infoById.get(steamid)?.name ?? 'Unknown');
+    const info = infoById.get(steamid) || infoByName.get(name);
+    const k = steamid || name;
+    if (!k || name === 'Unknown') continue;
+
+    const kills = asNumber(row.kills_total);
+    const deathsTotal = asNumber(row.deaths_total);
+    const assists = asNumber(row.assists_total);
+    const damage = asNumber(row.damage_total);
+    const hs = asNumber(row.headshot_kills_total);
+    const util = asNumber(row.utility_damage_total);
+    const flashed = asNumber(row.enemies_flashed_total);
+    const entry = entries.get(name) || { entryKills: 0, openingDeaths: 0 };
+
+    seen.set(k, {
+      steamid,
+      name,
+      teamNumber: asNumber(row.team_num ?? info?.teamNumber, 0),
+      teamName: cleanName(row.team_name ?? ''),
+      kills,
+      deaths: deathsTotal,
+      assists,
+      headshots: hs,
+      damage,
+      adr: rounds > 0 ? Number((damage / rounds).toFixed(1)) : 0,
+      kd: deathsTotal > 0 ? Number((kills / deathsTotal).toFixed(2)) : kills,
+      hsPct: kills > 0 ? Math.round((hs / kills) * 100) : 0,
+      utilityDamage: util,
+      enemiesFlashed: flashed,
+      entryKills: entry.entryKills,
+      openingDeaths: entry.openingDeaths,
+      impact: Number((kills * 1.0 + assists * 0.35 + entry.entryKills * 0.55 - deathsTotal * 0.52).toFixed(2)),
+    });
+  }
+
+  // Fallback: if aggregate tick props are unavailable, still build basic K/D/A from events.
+  if (seen.size === 0) {
+    for (const p of playerInfo) {
+      seen.set(keyOfPlayer(p), {
+        steamid: p.steamid,
+        name: p.name,
+        teamNumber: p.teamNumber,
+        teamName: '',
+        kills: 0, deaths: 0, assists: 0, headshots: 0, damage: 0,
+        adr: 0, kd: 0, hsPct: 0, utilityDamage: 0, enemiesFlashed: 0,
+        entryKills: entries.get(p.name)?.entryKills || 0,
+        openingDeaths: entries.get(p.name)?.openingDeaths || 0,
+        impact: 0,
+      });
+    }
+    for (const death of deaths) {
+      const attacker = [...seen.values()].find((p) => p.name === death.attacker);
+      const victim = [...seen.values()].find((p) => p.name === death.victim);
+      const assister = [...seen.values()].find((p) => p.name === death.assister);
+      if (attacker && attacker !== victim) {
+        attacker.kills++;
+        if (death.headshot) attacker.headshots++;
+      }
+      if (victim) victim.deaths++;
+      if (assister && assister !== attacker) assister.assists++;
+    }
+    for (const p of seen.values()) {
+      p.kd = p.deaths > 0 ? Number((p.kills / p.deaths).toFixed(2)) : p.kills;
+      p.hsPct = p.kills > 0 ? Math.round((p.headshots / p.kills) * 100) : 0;
+      p.impact = Number((p.kills + p.assists * 0.35 + p.entryKills * 0.55 - p.deaths * 0.52).toFixed(2));
+    }
+  }
+
+  return [...seen.values()].sort((a, b) => b.impact - a.impact || b.kills - a.kills);
+}
+
+function summarizeRounds(roundEnds) {
+  const rows = asArray(roundEnds);
+  const rounds = rows.length;
+  const wins = {};
+  for (const r of rows) {
+    const winner = cleanName(r.winner ?? r.winner_name ?? r.team ?? 'Unknown');
+    wins[winner] = (wins[winner] || 0) + 1;
+  }
+  return { rounds, wins };
+}
+
+async function parseDemo(filePath, originalName) {
+  const header = parseHeader(filePath) || {};
+  const playerInfo = normalizePlayerInfo(parsePlayerInfo(filePath));
+  const roundEnds = asArray(parseEvent(filePath, 'round_end'));
+  const roundSummary = summarizeRounds(roundEnds);
+  const lastTick = roundEnds.reduce((max, r) => Math.max(max, asNumber(r.tick)), 0);
+
+  let deathRows = [];
+  try {
+    deathRows = parseEvent(filePath, 'player_death', ['team_name'], ['total_rounds_played']);
+  } catch {
+    deathRows = parseEvent(filePath, 'player_death');
+  }
+  const deaths = normalizeDeaths(deathRows);
+
+  let tickRows = [];
+  if (lastTick > 0) {
+    const props = [
+      'kills_total', 'deaths_total', 'assists_total', 'headshot_kills_total',
+      'damage_total', 'utility_damage_total', 'enemies_flashed_total',
+      'team_name', 'team_num',
+    ];
+    try {
+      tickRows = parseTicks(filePath, props, [lastTick]);
+    } catch (error) {
+      console.warn('Aggregate tick stats unavailable:', error?.message || error);
+    }
+  }
+
+  const players = aggregateStats(tickRows, playerInfo, roundSummary.rounds, deaths);
+  const best = players[0] || null;
+
+  return {
+    fileName: originalName,
+    map: header.map_name || 'unknown',
+    server: header.server_name || '',
+    demoVersion: header.demo_version_name || '',
+    networkProtocol: header.network_protocol || '',
+    rounds: roundSummary.rounds,
+    roundWinsBySide: roundSummary.wins,
+    players,
+    topPlayer: best,
+    timeline: deaths.slice(0, 160),
+    parser: '@laihoe/demoparser2',
+  };
+}
+
+app.get('/api/health', (_req, res) => {
+  const aiMode = aiGatewayUrl ? 'gateway' : process.env.OPENAI_API_KEY ? 'direct' : 'none';
+  res.json({
+    ok: true,
+    parser: '@laihoe/demoparser2',
+    aiConfigured: aiMode !== 'none',
+    aiMode,
+  });
+});
+
+app.post('/api/analyze', upload.single('demo'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Файл .dem не получен' });
+  try {
+    const result = await parseDemo(req.file.path, req.file.originalname);
+    res.json(result);
+  } catch (error) {
+    console.error(error);
+    const message = String(error?.message || error || 'Unknown parser error');
+    res.status(422).json({
+      error: 'Не удалось разобрать демку',
+      details: message,
+      hint: message.includes('EntityNotFound')
+        ? 'Эта версия демки может быть несовместима с текущей версией парсера. Обнови зависимости командой npm update и попробуй снова.'
+        : 'Проверь, что это полноценная CS2 .dem, а не архив .dem.bz2/.zip.',
+    });
+  } finally {
+    await fs.unlink(req.file.path).catch(() => {});
+  }
+});
+
+function compactMatchForAI(match, selectedSteamid) {
+  const selected = match.players?.find((p) => String(p.steamid) === String(selectedSteamid))
+    || match.players?.find((p) => p.name === selectedSteamid)
+    || match.players?.[0];
+
+  const related = asArray(match.timeline)
+    .filter((e) => !selected || e.attacker === selected.name || e.victim === selected.name || e.assister === selected.name)
+    .slice(0, 45);
+
+  return {
+    map: match.map,
+    rounds: match.rounds,
+    selectedPlayer: selected,
+    scoreboard: asArray(match.players).slice(0, 10),
+    relatedKillEvents: related,
+  };
+}
+
+function extractOutputText(data) {
+  if (typeof data?.output_text === 'string' && data.output_text.trim()) return data.output_text.trim();
+  const chunks = [];
+  for (const item of asArray(data?.output)) {
+    for (const content of asArray(item?.content)) {
+      if (content?.type === 'output_text' && typeof content.text === 'string') chunks.push(content.text);
+      else if (typeof content?.text === 'string') chunks.push(content.text);
+    }
+  }
+  return chunks.join('\n').trim();
+}
+
+async function callOpenAIDirect(payload) {
+  if (!process.env.OPENAI_API_KEY) {
+    const error = new Error('OPENAI_API_KEY не настроен');
+    error.status = 503;
+    throw error;
+  }
+
+  const model = process.env.OPENAI_MODEL || 'gpt-5.4-mini';
+  const instructions = [
+    'Ты тренер по Counter-Strike 2 и аналитик демок.',
+    'Отвечай по-русски, кратко и предметно.',
+    'Опирайся только на переданную статистику и события; не выдумывай позиции и тайминги, которых нет в данных.',
+    'Формат: оценка 0-100; 3 сильные стороны; 3 главные ошибки/риска; 5 конкретных действий на следующую тренировку; затем короткий вывод.',
+    'Если данных недостаточно для тактического вывода, прямо укажи это и предложи, какие метрики нужно добавить.',
+  ].join(' ');
+
+  const apiResponse = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      instructions,
+      input: `Разбери эту CS2 демку для выбранного игрока:\n${JSON.stringify(payload)}`,
+      max_output_tokens: 1400,
+    }),
+    signal: AbortSignal.timeout(aiTimeoutMs),
+  });
+
+  const data = await apiResponse.json().catch(() => ({}));
+  if (!apiResponse.ok) {
+    const message = data?.error?.message || `OpenAI API HTTP ${apiResponse.status}`;
+    const error = new Error(message);
+    error.status = apiResponse.status;
+    throw error;
+  }
+
+  const text = extractOutputText(data);
+  if (!text) {
+    const error = new Error('OpenAI API вернул ответ без текста');
+    error.status = 502;
+    throw error;
+  }
+
+  return { analysis: text, model, provider: 'openai-direct' };
+}
+
+async function callAIGateway(payload) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (aiGatewayToken) headers.Authorization = `Bearer ${aiGatewayToken}`;
+
+  const response = await fetch(`${aiGatewayUrl}/v1/analyze`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ match: payload }),
+    signal: AbortSignal.timeout(aiTimeoutMs),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(data?.error || `AI Gateway HTTP ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
+  if (!data?.analysis) {
+    const error = new Error('AI Gateway вернул ответ без анализа');
+    error.status = 502;
+    throw error;
+  }
+  return data;
+}
+
+app.post('/api/ai', async (req, res) => {
+  const match = req.body?.match;
+  if (!match?.players?.length) return res.status(400).json({ error: 'Нет данных матча для AI-анализа' });
+
+  const payload = compactMatchForAI(match, req.body?.selectedSteamid);
+  const mode = aiGatewayUrl ? 'gateway' : process.env.OPENAI_API_KEY ? 'direct' : 'none';
+
+  if (mode === 'none') {
+    return res.status(503).json({
+      error: 'AI не настроен. Укажи AI_GATEWAY_URL в .env или OPENAI_API_KEY для прямого режима.',
+    });
+  }
+
+  try {
+    const result = mode === 'gateway'
+      ? await callAIGateway(payload)
+      : await callOpenAIDirect(payload);
+    res.json(result);
+  } catch (error) {
+    console.error(error);
+    const status = Number(error?.status) || 502;
+    const message = String(error?.message || error);
+    const hint = mode === 'direct' && /country|region|territory not supported/i.test(message)
+      ? 'Прямой OpenAI-запрос отклонён по региону. Настрой AI_GATEWAY_URL на сервер, развернутый в поддерживаемой стране.'
+      : mode === 'gateway'
+        ? 'Проверь AI_GATEWAY_URL, AI_GATEWAY_TOKEN и переменные окружения удалённого gateway.'
+        : undefined;
+    res.status(status).json({ error: message, hint });
+  }
+});
+
+app.use((error, _req, res, _next) => {
+  console.error(error);
+  if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ error: `Демка слишком большая. Лимит: ${maxDemoMb} MB.` });
+  }
+  res.status(400).json({ error: error?.message || 'Ошибка запроса' });
+});
+
+app.listen(port, () => {
+  console.log(`CS2 Demo AI Analyzer: http://localhost:${port}`);
+  console.log(`AI mode: ${aiGatewayUrl ? `gateway -> ${aiGatewayUrl}` : process.env.OPENAI_API_KEY ? 'direct OpenAI' : 'not configured'}`);
+});

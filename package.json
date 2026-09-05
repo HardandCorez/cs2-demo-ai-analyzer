@@ -1,0 +1,21 @@
+{
+  "name": "hardandcore-cs2-demo-ai",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "CS2 demo analyzer with demoparser2 and OpenAI coaching",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "check": "node --check src/server.js && node --check public/app.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@laihoe/demoparser2": "^0.42.0",
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0",
+    "multer": "^2.0.2"
+  }
+}

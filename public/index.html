@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#07090c" />
+  <title>HardandCore Demo AI — анализ демок CS2</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="noise"></div>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">HC</div>
+      <div>
+        <div class="brand-title">HardandCore Demo AI</div>
+        <div class="brand-sub">CS2 demo intelligence</div>
+      </div>
+    </div>
+    <div class="status" id="healthStatus"><span class="dot"></span> Проверка сервера…</div>
+  </header>
+
+  <main class="shell">
+    <section class="hero">
+      <div class="hero-copy">
+        <div class="eyebrow">REAL .DEM PARSER + OPENAI</div>
+        <h1>Разбирай демки CS2<br><span>как аналитик команды.</span></h1>
+        <p>Загрузи полноценный <strong>.dem</strong>. Сайт извлечёт статистику игроков, opening-duels, хедшоты, ADR, utility и события убийств, а затем даст AI-разбор выбранного игрока.</p>
+      </div>
+      <div class="hero-kpis">
+        <div class="mini-card"><b>10</b><span>игроков</span></div>
+        <div class="mini-card"><b>160</b><span>событий</span></div>
+        <div class="mini-card"><b>AI</b><span>коучинг</span></div>
+      </div>
+    </section>
+
+    <section class="upload-card" id="uploadCard">
+      <input id="demoInput" type="file" accept=".dem" hidden />
+      <div class="drop-zone" id="dropZone" tabindex="0" role="button" aria-label="Загрузить демку CS2">
+        <div class="upload-icon">↑</div>
+        <div>
+          <h2>Перетащи сюда .dem</h2>
+          <p>или нажми, чтобы выбрать файл</p>
+        </div>
+        <button class="primary" id="chooseBtn" type="button">Выбрать демку</button>
+      </div>
+      <div class="progress-wrap hidden" id="progressWrap">
+        <div class="progress-head"><span id="progressLabel">Подготовка…</span><span id="progressPercent">0%</span></div>
+        <div class="progress"><div id="progressBar"></div></div>
+      </div>
+      <div class="error hidden" id="errorBox"></div>
+    </section>
+
+    <section class="results hidden" id="results">
+      <div class="match-head">
+        <div>
+          <div class="eyebrow">MATCH OVERVIEW</div>
+          <h2 id="matchTitle">Матч</h2>
+          <p id="matchMeta"></p>
+        </div>
+        <div class="match-badges" id="matchBadges"></div>
+      </div>
+
+      <div class="grid metrics" id="metrics"></div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="eyebrow">SCOREBOARD</div>
+            <h3>Игроки</h3>
+          </div>
+          <div class="hint">Нажми на игрока → затем «AI-разбор»</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th><th>Игрок</th><th>K</th><th>D</th><th>A</th><th>K/D</th><th>ADR</th><th>HS%</th><th>Entry</th><th>Open D</th><th>Util</th>
+              </tr>
+            </thead>
+            <tbody id="scoreBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="eyebrow">DUEL TIMELINE</div>
+              <h3>Убийства</h3>
+            </div>
+            <select id="timelineFilter"></select>
+          </div>
+          <div class="timeline" id="timeline"></div>
+        </div>
+
+        <div class="panel ai-panel">
+          <div class="panel-head">
+            <div>
+              <div class="eyebrow">OPENAI COACH</div>
+              <h3>AI-разбор</h3>
+            </div>
+          </div>
+          <div class="selected-player" id="selectedPlayer">Выбери игрока в таблице</div>
+          <button class="primary full" id="aiBtn" type="button" disabled>Запустить AI-анализ</button>
+          <div class="ai-output muted" id="aiOutput">Здесь появятся сильные стороны, ошибки и план тренировки.</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>HardandCore Demo AI · локальная обработка .dem + серверный OpenAI API</footer>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
