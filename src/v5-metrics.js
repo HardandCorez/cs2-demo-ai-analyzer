@@ -9,10 +9,24 @@ const avg = (values, digits = 1) => {
   return nums.length ? fixed(nums.reduce((s, n) => s + n, 0) / nums.length, digits) : null;
 };
 
+function sameTeam(e) {
+  if (e?.attackerTeam && e?.victimTeam) return e.attackerTeam === e.victimTeam;
+  const a = asNumber(e?.attackerTeamNumber, 0);
+  const v = asNumber(e?.victimTeamNumber, 0);
+  return a > 0 && v > 0 && a === v;
+}
+
 function validEnemyKill(e) {
   if (!e?.attacker || !e?.victim || e.attacker === e.victim) return false;
-  if (e.attackerTeam && e.victimTeam && e.attackerTeam === e.victimTeam) return false;
+  if (sameTeam(e)) return false;
   return true;
+}
+
+function teammates(previous, current) {
+  if (previous?.victimTeam && current?.attackerTeam) return previous.victimTeam === current.attackerTeam;
+  const a = asNumber(previous?.victimTeamNumber, 0);
+  const b = asNumber(current?.attackerTeamNumber, 0);
+  return a > 0 && b > 0 && a === b;
 }
 
 export function annotateTrades(inputDeaths, tradeWindowSeconds = 5) {
@@ -41,14 +55,11 @@ export function annotateTrades(inputDeaths, tradeWindowSeconds = 5) {
         if (delta > tradeWindowSeconds) break;
         if (delta < 0 || previous.tradedDeath || !validEnemyKill(previous)) continue;
 
-        const teammateRelation = previous.victimTeam && current.attackerTeam
-          ? previous.victimTeam === current.attackerTeam
-          : false;
         const revengeRelation = previous.attackerSteamid && current.victimSteamid
           ? previous.attackerSteamid === current.victimSteamid
           : previous.attacker === current.victim;
 
-        if (teammateRelation && revengeRelation) {
+        if (teammates(previous, current) && revengeRelation) {
           current.tradeKill = true;
           current.tradeOf = previous.victim;
           previous.tradedDeath = true;
@@ -61,6 +72,23 @@ export function annotateTrades(inputDeaths, tradeWindowSeconds = 5) {
   return deaths.sort((a, b) => a.tick - b.tick);
 }
 
+function rosterTeams(rosterRaw) {
+  const roster = asArray(rosterRaw).filter((p) => p?.name && asNumber(p.teamNumber) >= 2);
+  const teams = new Map();
+  for (const p of roster) {
+    const team = asNumber(p.teamNumber);
+    if (!teams.has(team)) teams.set(team, new Set());
+    teams.get(team).add(p.name);
+  }
+  return teams;
+}
+
+function usableRoster(rosterRaw) {
+  const teams = rosterTeams(rosterRaw);
+  const total = [...teams.values()].reduce((sum, names) => sum + names.size, 0);
+  return teams.size === 2 && total >= 8;
+}
+
 function computeClutches(deaths, rostersByRound, roundEnds) {
   const result = new Map();
   const endByRound = new Map(asArray(roundEnds).map((r) => [asNumber(r.round), r]));
@@ -70,24 +98,14 @@ function computeClutches(deaths, rostersByRound, roundEnds) {
     byRound.get(e.round).push(e);
   }
 
-  const rosterEntries = rostersByRound && typeof rostersByRound === 'object'
-    ? Object.entries(rostersByRound)
-    : [];
-
+  const rosterEntries = rostersByRound && typeof rostersByRound === 'object' ? Object.entries(rostersByRound) : [];
   for (const [roundKey, rosterRaw] of rosterEntries) {
+    if (!usableRoster(rosterRaw)) continue;
     const round = asNumber(roundKey);
-    const roster = asArray(rosterRaw).filter((p) => p?.name && asNumber(p.teamNumber) >= 2);
-    const teams = new Map();
-    for (const p of roster) {
-      const team = asNumber(p.teamNumber);
-      if (!teams.has(team)) teams.set(team, new Set());
-      teams.get(team).add(p.name);
-    }
-    if (teams.size !== 2) continue;
-
+    const teams = rosterTeams(rosterRaw);
     const alive = new Map([...teams.entries()].map(([team, names]) => [team, new Set(names)]));
     const attempts = new Map();
-    const events = asArray(byRound.get(round)).slice().sort((a, b) => a.tick - b.tick);
+    const events = asArray(byRound.get(round)).filter(validEnemyKill).slice().sort((a, b) => a.tick - b.tick);
 
     for (const e of events) {
       const victimTeamNumber = asNumber(e.victimTeamNumber);
@@ -116,7 +134,6 @@ function computeClutches(deaths, rostersByRound, roundEnds) {
       if (winnerTeamNumber && winnerTeamNumber === attempt.team) stats.clutchWins += 1;
     }
   }
-
   return result;
 }
 
@@ -132,7 +149,6 @@ export function computeV5Metrics({ deaths: rawDeaths, players: rawPlayers, round
 
   const clutchByPlayer = computeClutches(deaths, rostersByRound, roundEnds);
   const advanced = new Map();
-
   const byRound = new Map();
   for (const e of deaths) {
     if (!byRound.has(e.round)) byRound.set(e.round, []);
@@ -226,14 +242,15 @@ export function computeV5Metrics({ deaths: rawDeaths, players: rawPlayers, round
   }
 
   const mergedPlayers = players.map((p) => ({ ...p, ...(advanced.get(p.name) || {}) }));
-  const rosterRoundCount = Object.keys(rostersByRound || {}).length;
+  const rosterRoundCount = Object.values(rostersByRound || {}).filter(usableRoster).length;
+  const timedTeamEvents = deaths.filter((e) => Number.isFinite(Number(e.secondsIntoRound)) && ((e.attackerTeam && e.victimTeam) || (asNumber(e.attackerTeamNumber) > 0 && asNumber(e.victimTeamNumber) > 0)));
 
   return {
     players: mergedPlayers,
     deaths,
     dataAvailability: {
-      tradeDetection: deaths.some((e) => Number.isFinite(Number(e.secondsIntoRound)) && e.attackerTeam && e.victimTeam),
-      kast: rounds > 0,
+      tradeDetection: timedTeamEvents.length > 0,
+      kast: asNumber(rounds) > 0,
       multikills: true,
       firstContactTiming: deaths.some((e) => Number.isFinite(Number(e.secondsIntoRound))),
       clutchDetection: rosterRoundCount >= Math.max(1, Math.floor(asNumber(rounds) * 0.8)),
