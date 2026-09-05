@@ -7,7 +7,7 @@ const port = Number(process.env.OLLAMA_GATEWAY_PORT || 11435);
 const ollamaUrl = String(process.env.OLLAMA_URL || 'http://127.0.0.1:11434').trim().replace(/\/+$/, '');
 const model = String(process.env.OLLAMA_MODEL || 'qwen3:8b').trim();
 const gatewayToken = String(process.env.AI_GATEWAY_TOKEN || '').trim();
-const timeoutMs = Math.max(30_000, Number(process.env.AI_TIMEOUT_MS || 180_000));
+const timeoutMs = Math.max(60_000, Number(process.env.AI_TIMEOUT_MS || 600_000));
 
 app.disable('x-powered-by');
 app.use(express.json({ limit: '512kb' }));
@@ -50,6 +50,7 @@ app.get('/health', async (_req, res) => {
       provider: 'ollama-local',
       ollamaUrl,
       model,
+      timeoutMs,
       modelInstalled: models.some((name) => name === model || name.startsWith(`${model}:`)),
       models,
     });
@@ -84,13 +85,16 @@ app.post('/v1/analyze', authorize, async (req, res) => {
       body: JSON.stringify({
         model,
         stream: false,
+        think: false,
+        keep_alive: '15m',
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: `Разбери эту CS2 демку для выбранного игрока:\n${JSON.stringify(match)}` },
         ],
         options: {
           temperature: 0.2,
-          num_ctx: 8192,
+          num_ctx: 4096,
+          num_predict: 700,
         },
       }),
     });
@@ -114,7 +118,9 @@ app.post('/v1/analyze', authorize, async (req, res) => {
       error: timeout
         ? `Локальная модель не ответила за ${Math.round(timeoutMs / 1000)} секунд`
         : `Ollama недоступен: ${error?.message || error}`,
-      hint: 'Проверь, что Ollama запущен и отвечает на http://127.0.0.1:11434.',
+      hint: timeout
+        ? 'Первый запуск модели может быть долгим. Проверь загрузку CPU/GPU и при необходимости используй qwen3:4b.'
+        : 'Проверь, что Ollama запущен и отвечает на http://127.0.0.1:11434.',
     });
   }
 });
@@ -123,4 +129,5 @@ app.listen(port, host, () => {
   console.log(`Local Ollama gateway: http://${host}:${port}`);
   console.log(`Ollama: ${ollamaUrl}`);
   console.log(`Model: ${model}`);
+  console.log(`AI timeout: ${Math.round(timeoutMs / 1000)}s`);
 });
