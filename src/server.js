@@ -12,6 +12,7 @@ import {
   parseTicks,
 } from '@laihoe/demoparser2';
 import { computeV5Metrics } from './v5-metrics.js';
+import { computeV6Positioning } from './v6-positioning.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,7 +26,7 @@ const aiTimeoutMs = Math.max(10_000, Number(process.env.AI_TIMEOUT_MS || 600_000
 
 const app = express();
 app.disable('x-powered-by');
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '3mb' }));
 app.use(express.static(publicDir));
 
 const upload = multer({
@@ -103,6 +104,7 @@ function normalizeDeaths(rows) {
 function isEnemyKill(e) {
   if (!e?.attacker || !e?.victim || e.attacker === e.victim) return false;
   if (e.attackerTeam && e.victimTeam && e.attackerTeam === e.victimTeam) return false;
+  if (e.attackerTeamNumber > 0 && e.victimTeamNumber > 0 && e.attackerTeamNumber === e.victimTeamNumber) return false;
   return true;
 }
 
@@ -193,8 +195,16 @@ function aggregateStats(tickRows, playerInfo, rounds, deaths) {
         name: p.name,
         teamNumber: p.teamNumber,
         teamName: '',
-        kills: 0, deaths: 0, assists: 0, headshots: 0, damage: 0,
-        adr: 0, kd: 0, hsPct: 0, utilityDamage: 0, enemiesFlashed: 0,
+        kills: 0,
+        deaths: 0,
+        assists: 0,
+        headshots: 0,
+        damage: 0,
+        adr: 0,
+        kd: 0,
+        hsPct: 0,
+        utilityDamage: 0,
+        enemiesFlashed: 0,
         entryKills: entries.get(p.name)?.entryKills || 0,
         openingDeaths: entries.get(p.name)?.openingDeaths || 0,
         impact: 0,
@@ -205,11 +215,11 @@ function aggregateStats(tickRows, playerInfo, rounds, deaths) {
       const victim = [...seen.values()].find((p) => p.name === death.victim);
       const assister = [...seen.values()].find((p) => p.name === death.assister);
       if (attacker && attacker !== victim) {
-        attacker.kills++;
-        if (death.headshot) attacker.headshots++;
+        attacker.kills += 1;
+        if (death.headshot) attacker.headshots += 1;
       }
-      if (victim) victim.deaths++;
-      if (assister && assister !== attacker) assister.assists++;
+      if (victim) victim.deaths += 1;
+      if (assister && assister !== attacker) assister.assists += 1;
     }
     for (const [key, p] of seen) {
       p.kd = p.deaths > 0 ? Number((p.kills / p.deaths).toFixed(2)) : p.kills;
@@ -226,10 +236,10 @@ function summarizeRounds(roundEnds) {
   const rows = asArray(roundEnds).filter((r) => !Boolean(pick(r, 'is_warmup_period')));
   const rounds = rows.length;
   const wins = {};
-  rows.forEach((r, index) => {
+  for (const r of rows) {
     const winner = cleanName(r.winner ?? r.winner_name ?? r.team ?? 'Unknown');
     wins[winner] = (wins[winner] || 0) + 1;
-  });
+  }
   return { rounds, wins };
 }
 
@@ -269,6 +279,33 @@ function buildRoundRosters(roundStarts, rosterTicks) {
     }
   }
   return rosters;
+}
+
+function uniquePositiveTicks(events) {
+  return [...new Set(asArray(events).map((event) => asNumber(event.tick)).filter((tick) => tick > 0))];
+}
+
+function parsePositionSnapshots(filePath, deaths) {
+  const ticks = uniquePositiveTicks(deaths);
+  if (!ticks.length) return [];
+
+  const fullProps = [
+    'X', 'Y', 'Z',
+    'velocity', 'velocity_X', 'velocity_Y',
+    'yaw', 'team_num', 'team_name', 'is_alive',
+    'is_walking', 'is_scoped', 'flash_duration', 'last_place_name',
+  ];
+  try {
+    return parseTicks(filePath, fullProps, ticks);
+  } catch (error) {
+    console.warn('Full V6 position snapshot unavailable, retrying minimal coordinates:', error?.message || error);
+    try {
+      return parseTicks(filePath, ['X', 'Y', 'Z', 'team_num', 'team_name', 'is_alive'], ticks);
+    } catch (fallbackError) {
+      console.warn('V6 coordinate snapshots unavailable:', fallbackError?.message || fallbackError);
+      return [];
+    }
+  }
 }
 
 async function parseDemo(filePath, originalName) {
@@ -336,8 +373,20 @@ async function parseDemo(filePath, originalName) {
     rostersByRound,
     roundEnds: normalizedRoundEnds,
   });
-  const players = advanced.players.sort((a, b) => b.impact - a.impact || b.kills - a.kills);
+
+  const positionSnapshotRows = parsePositionSnapshots(filePath, advanced.deaths);
+  const positional = computeV6Positioning({
+    deaths: advanced.deaths,
+    players: advanced.players,
+    snapshotRows: positionSnapshotRows,
+  });
+
+  const players = positional.players.sort((a, b) => b.impact - a.impact || b.kills - a.kills);
   const best = players[0] || null;
+  const dataAvailability = {
+    ...advanced.dataAvailability,
+    ...positional.dataAvailability,
+  };
 
   return {
     fileName: originalName,
@@ -349,10 +398,11 @@ async function parseDemo(filePath, originalName) {
     roundWinsBySide: roundSummary.wins,
     players,
     topPlayer: best,
-    timeline: advanced.deaths.slice(0, 500),
-    timelineTruncated: advanced.deaths.length > 500,
-    dataAvailability: advanced.dataAvailability,
-    advancedMetricsVersion: 'v5-trades-kast-clutch-timing',
+    timeline: positional.deaths.slice(0, 500),
+    timelineTruncated: positional.deaths.length > 500,
+    dataAvailability,
+    positioning: positional.positioning,
+    advancedMetricsVersion: 'v6-positioning-context',
     parser: '@laihoe/demoparser2',
   };
 }
@@ -362,7 +412,7 @@ app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
     parser: '@laihoe/demoparser2',
-    advancedMetricsVersion: 'v5-trades-kast-clutch-timing',
+    advancedMetricsVersion: 'v6-positioning-context',
     aiConfigured: aiMode !== 'none',
     aiMode,
   });
@@ -435,6 +485,27 @@ function buildVerifiedMetrics(selected, rounds) {
     avgOpeningKillTimeSec: selected.avgOpeningKillTimeSec ?? null,
     avgOpeningDeathTimeSec: selected.avgOpeningDeathTimeSec ?? null,
     avgOpeningDuelTimeSec: selected.avgOpeningDuelTimeSec ?? null,
+    positionSamples: asNumber(selected.positionSamples),
+    spacingSamples: asNumber(selected.spacingSamples),
+    avgNearestTeammateDistanceAtDeath: selected.avgNearestTeammateDistanceAtDeath ?? null,
+    isolatedDeathsHeuristic: asNumber(selected.isolatedDeathsHeuristic),
+    isolatedDeathPct: selected.isolatedDeathPct ?? null,
+    movementDeathSamples: asNumber(selected.movementDeathSamples),
+    avgVelocityAtDeath: selected.avgVelocityAtDeath ?? null,
+    highSpeedDeaths: asNumber(selected.highSpeedDeaths),
+    highSpeedDeathPct: selected.highSpeedDeathPct ?? null,
+    flashedDeathSamples: asNumber(selected.flashedDeathSamples),
+    flashedDeaths: asNumber(selected.flashedDeaths),
+    flashedDeathPct: selected.flashedDeathPct ?? null,
+    facingDeathSamples: asNumber(selected.facingDeathSamples),
+    attackerOutsideFrontDeaths: asNumber(selected.attackerOutsideFrontDeaths),
+    attackerOutsideFrontPct: selected.attackerOutsideFrontPct ?? null,
+    avgFacingErrorAtDeathDeg: selected.avgFacingErrorAtDeathDeg ?? null,
+    duelDistanceSamples: asNumber(selected.duelDistanceSamples),
+    avgDuelDistanceAtDeath: selected.avgDuelDistanceAtDeath ?? null,
+    topDeathPlace: selected.topDeathPlace || '',
+    topDeathPlaceDeaths: asNumber(selected.topDeathPlaceDeaths),
+    topDeathPlacePct: selected.topDeathPlacePct ?? null,
     customImpact: fixed(selected.impact, 2),
   };
 }
@@ -448,6 +519,7 @@ function compactMatchForAI(match, selectedSteamid) {
     .filter((e) => !selected || e.attacker === selected.name || e.victim === selected.name || e.assister === selected.name || e.tradeOf === selected.name);
   const related = allRelated.slice(0, 80);
   const availability = match.dataAvailability || {};
+  const thresholds = match.positioning?.thresholds || {};
 
   return {
     map: match.map,
@@ -467,6 +539,12 @@ function compactMatchForAI(match, selectedSteamid) {
       clutchAttempts: 'rounds where roster tracking shows the player became the sole survivor against at least one opponent',
       clutchWins: 'clutch attempts where the player team won the round',
       avgOpeningDuelTimeSec: 'average seconds from round_start_time to opening duel when selected player was involved',
+      avgNearestTeammateDistanceAtDeath: '2D game-unit distance to the nearest alive teammate sampled at the death tick; walls and floors are not modeled',
+      isolatedDeathPct: `share of spacing samples above ${thresholds.isolatedDistanceUnits ?? 900} game units; heuristic only`,
+      highSpeedDeathPct: `share of movement samples above ${thresholds.highSpeedUnitsPerSec ?? 140} units/s at death; not a wide-peek detector`,
+      flashedDeathPct: 'share of sampled deaths where flash_duration was still positive at the death tick',
+      attackerOutsideFrontPct: `share of facing samples where attacker bearing differed from victim yaw by more than ${thresholds.outsideFrontDegrees ?? 75} degrees; no line-of-sight model`,
+      topDeathPlace: 'most frequent parser last_place_name among sampled death positions',
       customImpact: 'project-specific heuristic, NOT HLTV Rating',
     },
     dataAvailability: {
@@ -474,7 +552,17 @@ function compactMatchForAI(match, selectedSteamid) {
       exactRoundStartTiming: Boolean(availability.firstContactTiming),
       firstContactTiming: Boolean(availability.firstContactTiming),
       reactionTime: false,
-      playerPositions: false,
+      playerPositions: Boolean(availability.playerPositions),
+      positionalHeatmap: Boolean(availability.positionalHeatmap),
+      teammateSpacing: Boolean(availability.teammateSpacing),
+      movementAtDeath: Boolean(availability.movementAtDeath),
+      flashedAtDeath: Boolean(availability.flashedAtDeath),
+      facingAtDeath: Boolean(availability.facingAtDeath),
+      placeNames: Boolean(availability.placeNames),
+      widePeekDetection: false,
+      repeekDetection: false,
+      lineOfSight: false,
+      navMesh: false,
       tradeDetection: Boolean(availability.tradeDetection),
       clutchDetection: Boolean(availability.clutchDetection),
       economy: false,
@@ -496,14 +584,16 @@ function strictCoachInstructions() {
     'Ты CS2-аналитик. Работай как проверяющий статистику, а не как рассказчик.',
     'Используй только verifiedMetrics, scoreboard, relatedKillEvents, metricDefinitions и dataAvailability.',
     'Каждый конкретный вывод должен опираться на числовую метрику или конкретное событие раунда из входных данных.',
-    'Никогда не выдумывай время реакции, позиционирование, экономику, сторону T/CT или качество гранат, если dataAvailability говорит false.',
-    'Трейды, KAST, multikills, clutch и timing разрешено обсуждать только когда соответствующий dataAvailability=true.',
+    'Позиционные метрики V6 являются контекстными эвристиками: координаты не учитывают стены, этажи, navmesh и line-of-sight.',
+    'Запрещено называть highSpeedDeathPct wide-peek, а повторные смерти repeek: widePeekDetection и repeekDetection пока false.',
+    'Никогда не выдумывай время реакции, экономику, сторону T/CT или качество гранат, если dataAvailability говорит false.',
+    'Трейды, KAST, multikills, clutch, timing и positioning разрешено обсуждать только когда соответствующий dataAvailability=true.',
     'enemiesFlashed означает зарегистрированные эффекты ослепления врагов, а не количество брошенных флешек.',
     'customImpact — внутренний коэффициент проекта, не называй его HLTV Rating.',
     'Не называй K/D 1.0+ низким без явного сравнительного контекста.',
     'Высокий HS% сам по себе не доказывает хорошее принятие решений.',
     'Если метрика недоступна, прямо напиши: данных недостаточно для этого вывода.',
-    'Формат ответа: Оценка 0-100; Подтвержденные сильные стороны; Подтвержденные проблемы; Что нельзя заключить из этих данных; 5 действий на тренировку; Короткий вывод.',
+    'Формат ответа: Оценка 0-100; Подтвержденные сильные стороны; Подтвержденные проблемы; Позиционный контекст V6; Что нельзя заключить; 5 действий на тренировку; Короткий вывод.',
   ].join(' ');
 }
 
@@ -530,14 +620,14 @@ async function callOpenAIDirect(payload) {
   const apiResponse = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
       model,
       instructions: strictCoachInstructions(),
       input: `Разбери матч только по подтвержденным данным:\n${JSON.stringify(payload)}`,
-      max_output_tokens: 1600,
+      max_output_tokens: 1800,
     }),
     signal: AbortSignal.timeout(aiTimeoutMs),
   });
@@ -629,6 +719,6 @@ app.use((error, _req, res, _next) => {
 
 app.listen(port, () => {
   console.log(`CS2 Demo AI Analyzer: http://localhost:${port}`);
-  console.log('Advanced metrics: v5-trades-kast-clutch-timing');
+  console.log('Advanced metrics: v6-positioning-context');
   console.log(`AI mode: ${aiGatewayUrl ? `gateway -> ${aiGatewayUrl}` : process.env.OPENAI_API_KEY ? 'direct OpenAI' : 'not configured'}`);
 });
