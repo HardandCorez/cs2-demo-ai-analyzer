@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="/v61.css" />
   <link rel="stylesheet" href="/v71.css" />
   <link rel="stylesheet" href="/v72.css" />
+  <link rel="stylesheet" href="/v73.css" />
 </head>
 <body>
   <div class="noise"></div>
@@ -17,7 +18,7 @@
       <div class="brand-mark">HC</div>
       <div>
         <div class="brand-title">HardandCore Demo AI</div>
-        <div class="brand-sub">CS2 demo intelligence · V7.2 Visual Coach</div>
+        <div class="brand-sub">CS2 demo intelligence · V7.3 Visual Coach</div>
       </div>
     </div>
     <div class="status" id="healthStatus"><span class="dot"></span> Проверка сервера…</div>
@@ -26,12 +27,12 @@
   <main class="shell">
     <section class="hero">
       <div class="hero-copy">
-        <div class="eyebrow">REAL .DEM PARSER + LOCAL AI + VISUAL COACH V7.2</div>
+        <div class="eyebrow">REAL .DEM PARSER + LOCAL AI + VISUAL COACH V7.3</div>
         <h1>Разбирай демки CS2<br><span>как аналитик команды.</span></h1>
-        <p>Загрузи полноценный <strong>.dem</strong>. Сайт считает K/D, ADR, opening, trades, KAST, multikills, clutch и timing, рисует события на настоящем radar, показывает траекторию перед смертью и теперь накладывает визуальный вариант более безопасного решения прямо на карту.</p>
+        <p>Загрузи полноценный <strong>.dem</strong>. Сайт считает K/D, ADR, opening, trades, KAST, multikills, clutch и timing, рисует события на настоящем radar, показывает траекторию перед смертью и накладывает визуальный вариант более безопасного решения прямо на карту.</p>
       </div>
       <div class="hero-kpis">
-        <div class="mini-card"><b>V7.2</b><span>visual coach</span></div>
+        <div class="mini-card"><b>V7.3</b><span>visual coach</span></div>
         <div class="mini-card"><b>3s</b><span>death trajectory</span></div>
         <div class="mini-card"><b>AI</b><span>prescriptive coach</span></div>
       </div>
@@ -89,7 +90,7 @@
       <div class="panel positioning-panel">
         <div class="panel-head radar-head">
           <div>
-            <div class="eyebrow">REAL RADAR V7.2 · VISUAL COACH</div>
+            <div class="eyebrow">REAL RADAR V7.3 · VISUAL COACH</div>
             <h3>Интерактивная карта событий и правильного решения</h3>
             <div class="radar-status" id="radarStatus">Ищем radar для карты…</div>
           </div>
@@ -119,14 +120,14 @@
           <div class="position-empty hidden" id="positionEmpty">В этой демке координаты событий недоступны.</div>
         </div>
         <div class="radar-detail hidden" id="radarDetail"></div>
-        <div class="radar-help">Колесо мыши — zoom · зажми ЛКМ и тащи — pan · клик по смерти — траектория + визуальный coach · двойной клик — сброс вида.</div>
+        <div class="radar-help">Приближение: кнопки − / + или колесо мыши · зажми ЛКМ и тащи — pan · клик по смерти — траектория + визуальный coach · двойной клик — сброс вида.</div>
         <div class="position-legend">
           <span><i class="legend-dot death-dot"></i> смерти</span>
           <span><i class="legend-dot kill-dot"></i> фраги</span>
           <span><i class="peek-legend-ring"></i> WIDE*</span>
           <span><i class="repeek-legend-box"></i> REPEEK*</span>
           <span><i class="traj-legend-line"></i> траектория перед смертью</span>
-          <span class="muted">V7.2 накладывает safe-default решение на реальные координаты. WIDE/REPEEK остаются эвристиками, а рекомендованный путь не является navmesh/LOS расчётом.</span>
+          <span class="muted">V7.3 накладывает safe-default решение на реальные координаты. WIDE/REPEEK остаются эвристиками, а рекомендованный путь не является navmesh/LOS расчётом.</span>
         </div>
       </div>
 
@@ -157,7 +158,7 @@
     </section>
   </main>
 
-  <footer>HardandCore Demo AI · локальная обработка .dem + Ollama · V7.2 visual coach + V7.1 interactive radar</footer>
+  <footer>HardandCore Demo AI · локальная обработка .dem + Ollama · V7.3 visual coach + manual zoom controls</footer>
   <script type="module" src="/bootstrap-v72.js"></script>
 </body>
 </html>
