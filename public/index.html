@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#07090c" />
   <title>HardandCore Demo AI — анализ демок CS2</title>
   <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/v61.css" />
 </head>
 <body>
   <div class="noise"></div>
@@ -14,7 +15,7 @@
       <div class="brand-mark">HC</div>
       <div>
         <div class="brand-title">HardandCore Demo AI</div>
-        <div class="brand-sub">CS2 demo intelligence · V6</div>
+        <div class="brand-sub">CS2 demo intelligence · V6.1</div>
       </div>
     </div>
     <div class="status" id="healthStatus"><span class="dot"></span> Проверка сервера…</div>
@@ -23,12 +24,12 @@
   <main class="shell">
     <section class="hero">
       <div class="hero-copy">
-        <div class="eyebrow">REAL .DEM PARSER + LOCAL AI + POSITIONING V6</div>
+        <div class="eyebrow">REAL .DEM PARSER + LOCAL AI + POSITIONING V6.1</div>
         <h1>Разбирай демки CS2<br><span>как аналитик команды.</span></h1>
-        <p>Загрузи полноценный <strong>.dem</strong>. Сайт считает K/D, ADR, opening, trades, KAST, multikills, clutch, timing и теперь добавляет координатный контекст смертей: spacing, скорость, flash state, направление взгляда и heatmap.</p>
+        <p>Загрузи полноценный <strong>.dem</strong>. Сайт считает K/D, ADR, opening, trades, KAST, multikills, clutch и timing, строит координатную heatmap и добавляет spacing, flash/facing context, wide-peek-like и post-kill repeek-like флаги.</p>
       </div>
       <div class="hero-kpis">
-        <div class="mini-card"><b>V6</b><span>positioning</span></div>
+        <div class="mini-card"><b>V6.1</b><span>peek heuristics</span></div>
         <div class="mini-card"><b>KAST</b><span>trades</span></div>
         <div class="mini-card"><b>AI</b><span>verified coach</span></div>
       </div>
@@ -86,8 +87,8 @@
       <div class="panel positioning-panel">
         <div class="panel-head">
           <div>
-            <div class="eyebrow">POSITIONING V6</div>
-            <h3>Координатный контекст</h3>
+            <div class="eyebrow">POSITIONING V6.1</div>
+            <h3>Координатный контекст и peek-флаги</h3>
           </div>
           <select id="positionMode" aria-label="Режим positioning map">
             <option value="both">Фраги + смерти</option>
@@ -103,7 +104,9 @@
         <div class="position-legend">
           <span><i class="legend-dot death-dot"></i> смерти</span>
           <span><i class="legend-dot kill-dot"></i> фраги</span>
-          <span class="muted">Проекция нормализована по координатам событий; это не радар карты и она не знает стены/этажи.</span>
+          <span><i class="peek-legend-ring"></i> WIDE*</span>
+          <span><i class="repeek-legend-box"></i> REPEEK*</span>
+          <span class="muted">* эвристика. Проекция нормализована по координатам событий; это не радар карты и она не знает стены/этажи/LOS.</span>
         </div>
       </div>
 
@@ -122,19 +125,19 @@
         <div class="panel ai-panel">
           <div class="panel-head">
             <div>
-              <div class="eyebrow">LOCAL VERIFIED COACH · V6</div>
+              <div class="eyebrow">LOCAL VERIFIED COACH · V6.1</div>
               <h3>AI-разбор</h3>
             </div>
           </div>
           <div class="selected-player" id="selectedPlayer">Выбери игрока в таблице</div>
           <button class="primary full" id="aiBtn" type="button" disabled>Запустить AI-анализ</button>
-          <div class="ai-output muted" id="aiOutput">Здесь появятся только подтверждённые метрики и осторожные positioning-эвристики.</div>
+          <div class="ai-output muted" id="aiOutput">Здесь появятся подтверждённые метрики и осторожные V6.1 peek-эвристики.</div>
         </div>
       </div>
     </section>
   </main>
 
-  <footer>HardandCore Demo AI · локальная обработка .dem + Ollama · V6 positioning context</footer>
+  <footer>HardandCore Demo AI · локальная обработка .dem + Ollama · V6.1 positioning + peek heuristics</footer>
   <script type="module" src="/app.js"></script>
 </body>
 </html>
