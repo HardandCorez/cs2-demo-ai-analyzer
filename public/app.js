@@ -32,7 +32,8 @@ async function checkHealth() {
     const data = await r.json();
     els.health.classList.toggle('ok', !!data.ok);
     const aiLabel = data.aiMode === 'gateway' ? 'AI локально' : data.aiMode === 'direct' ? 'AI direct' : 'AI не настроен';
-    els.health.innerHTML = `<span class="dot"></span>${data.ok ? 'Парсер готов' : 'Ошибка сервера'} · ${aiLabel}`;
+    const v5 = data.advancedMetricsVersion ? ' · V5' : '';
+    els.health.innerHTML = `<span class="dot"></span>${data.ok ? 'Парсер готов' : 'Ошибка сервера'} · ${aiLabel}${v5}`;
   } catch {
     els.health.innerHTML = '<span class="dot"></span>Сервер недоступен';
   }
@@ -43,7 +44,7 @@ function fakeProgressUntil(responsePromise) {
   setProgress(pct, 'Загрузка демки…');
   const timer = setInterval(() => {
     pct = Math.min(88, pct + Math.max(1, (90 - pct) * 0.08));
-    const label = pct < 35 ? 'Загрузка демки…' : pct < 72 ? 'Парсер читает события CS2…' : 'Считаем статистику…';
+    const label = pct < 35 ? 'Загрузка демки…' : pct < 72 ? 'Парсер читает события CS2…' : 'Считаем V5-метрики…';
     setProgress(pct, label);
   }, 300);
   return responsePromise.finally(() => clearInterval(timer));
@@ -51,9 +52,7 @@ function fakeProgressUntil(responsePromise) {
 
 async function analyzeFile(file) {
   if (!file) return;
-  if (!file.name.toLowerCase().endsWith('.dem')) {
-    return setError('Нужен файл с расширением .dem');
-  }
+  if (!file.name.toLowerCase().endsWith('.dem')) return setError('Нужен файл с расширением .dem');
   setError();
   els.results.classList.add('hidden');
   const form = new FormData();
@@ -81,16 +80,19 @@ function renderMatch() {
   els.matchBadges.innerHTML = [
     match.demoVersion && `<span class="badge">${esc(match.demoVersion)}</span>`,
     match.parser && `<span class="badge">${esc(match.parser)}</span>`,
+    match.advancedMetricsVersion && `<span class="badge">V5 advanced</span>`,
     match.networkProtocol && `<span class="badge">protocol ${esc(match.networkProtocol)}</span>`,
   ].filter(Boolean).join('');
 
   const top = match.players?.[0];
   const avgAdr = match.players?.length ? Math.round(match.players.reduce((s,p)=>s+(p.adr||0),0)/match.players.length) : 0;
+  const kastValues = (match.players || []).map((p) => Number(p.kastPct)).filter(Number.isFinite);
+  const avgKast = kastValues.length ? `${Math.round(kastValues.reduce((s,n)=>s+n,0)/kastValues.length)}%` : '—';
   els.metrics.innerHTML = [
     ['Раунды', match.rounds || 0],
     ['Лучший по impact', top?.name || '—'],
     ['Топ K/D', top?.kd ?? '—'],
-    ['Средний ADR', avgAdr],
+    ['Средний KAST', avgKast],
   ].map(([label, value]) => `<div class="metric"><span>${esc(label)}</span><b>${esc(value)}</b></div>`).join('');
 
   renderScoreboard();
@@ -133,7 +135,7 @@ function playerById(id) {
 function renderTimeline() {
   const filter = els.timelineFilter.value;
   const player = filter === 'all' ? null : playerById(filter);
-  const rows = (match.timeline || []).filter((e) => !player || e.attacker === player.name || e.victim === player.name || e.assister === player.name);
+  const rows = (match.timeline || []).filter((e) => !player || e.attacker === player.name || e.victim === player.name || e.assister === player.name || e.tradeOf === player.name);
   if (!rows.length) {
     els.timeline.innerHTML = '<div class="muted">События убийств не найдены.</div>';
     return;
@@ -142,6 +144,8 @@ function renderTimeline() {
     <div class="event-round">R${e.round || '?'}</div>
     <div class="event-main"><strong>${esc(e.attacker || 'world')}</strong> → <strong>${esc(e.victim || '?')}</strong>
       ${e.weapon ? `<span class="weapon"> · ${esc(e.weapon)}</span>` : ''}${e.headshot ? '<span class="hs">HS</span>' : ''}
+      ${Number.isFinite(Number(e.secondsIntoRound)) ? `<span class="weapon"> · ${Number(e.secondsIntoRound).toFixed(1)}s</span>` : ''}
+      ${e.tradeKill ? '<span class="hs">TRADE</span>' : ''}
     </div>
   </div>`).join('');
 }
@@ -153,9 +157,16 @@ function renderSelectedPlayer() {
     els.aiBtn.disabled = true;
     return;
   }
-  els.selectedPlayer.innerHTML = `<strong>${esc(p.name)}</strong><br><span class="muted">${p.kills}/${p.deaths}/${p.assists} · ADR ${p.adr} · HS ${p.hsPct}% · Entry ${p.entryKills}:${p.openingDeaths}</span>`;
+  const advanced = [
+    p.kastPct != null ? `KAST ${p.kastPct}%` : null,
+    match?.dataAvailability?.tradeDetection ? `Trades ${p.tradeKills || 0} · traded deaths ${p.tradedDeaths || 0}${p.tradedDeathPct != null ? ` (${p.tradedDeathPct}%)` : ''}` : null,
+    `2K+ rounds ${p.multiKillRounds || 0}`,
+    match?.dataAvailability?.clutchDetection ? `Clutch ${p.clutchWins || 0}/${p.clutchAttempts || 0}` : null,
+    match?.dataAvailability?.firstContactTiming && p.avgOpeningDuelTimeSec != null ? `Opening timing ${p.avgOpeningDuelTimeSec}s` : null,
+  ].filter(Boolean).join(' · ');
+  els.selectedPlayer.innerHTML = `<strong>${esc(p.name)}</strong><br><span class="muted">${p.kills}/${p.deaths}/${p.assists} · ADR ${p.adr} · HS ${p.hsPct}% · Entry ${p.entryKills}:${p.openingDeaths}</span>${advanced ? `<br><span class="muted">${esc(advanced)}</span>` : ''}`;
   els.aiBtn.disabled = false;
-  els.aiOutput.textContent = 'Готов к локальному AI-разбору выбранного игрока.';
+  els.aiOutput.textContent = 'Готов к локальному AI-разбору с V5-метриками.';
   els.aiOutput.classList.add('muted');
 }
 
