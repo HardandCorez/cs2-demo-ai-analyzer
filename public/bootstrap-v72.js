@@ -1,15 +1,16 @@
-const v9css=document.createElement('link');v9css.rel='stylesheet';v9css.href='/v9.css';document.head.appendChild(v9css);
-const v91css=document.createElement('link');v91css.rel='stylesheet';v91css.href='/v91.css';document.head.appendChild(v91css);
-const v10css=document.createElement('link');v10css.rel='stylesheet';v10css.href='/v10.css';document.head.appendChild(v10css);
-await import('./v92-progress.js');
-await import('./v9-suite.js');
-await import('./v91-ui.js');
-await import('./v10-replay-coach.js');
-await import('./visual-coach-v72.js');
 await import('./app.js');
-await import('./zoom-controls-v73.js');
-const brandSub=document.querySelector('.brand-sub');if(brandSub)brandSub.textContent='CS2 demo intelligence · V10 AI Replay Coach';
-const heroEyebrow=document.querySelector('.hero .eyebrow');if(heroEyebrow)heroEyebrow.textContent='REAL .DEM PARSER + 2D REPLAY + EPISODE-LEVEL COACH';
-const heroText=document.querySelector('.hero-copy p');if(heroText)heroText.innerHTML='Загрузи полноценный <strong>.dem</strong>. V10 связывает критические эпизоды с 2D replay: открывает момент за 4 секунды до ошибки, проигрывает его и автоматически ставит паузу на событии.';
-const firstKpi=document.querySelector('.hero-kpis .mini-card');if(firstKpi)firstKpi.innerHTML='<b>V10</b><span>AI replay coach</span>';
-const footer=document.querySelector('footer');if(footer)footer.textContent='HardandCore Demo AI · V10 AI Replay Coach · local processing';
+
+const brandSub=document.querySelector('.brand-sub');
+if(brandSub)brandSub.textContent='CS2 demo intelligence · Recovery Build 4.0.1';
+
+const heroEyebrow=document.querySelector('.hero .eyebrow');
+if(heroEyebrow)heroEyebrow.textContent='REAL .DEM PARSER · STABLE CORE ANALYSIS';
+
+const heroText=document.querySelector('.hero-copy p');
+if(heroText)heroText.innerHTML='Загрузи полноценный <strong>.dem</strong>. В recovery-сборке временно отключён тяжёлый 2D replay-пайплайн, который зависал на 88%. Работают базовые метрики, scoreboard, timeline, positioning и AI-анализ.';
+
+const firstKpi=document.querySelector('.hero-kpis .mini-card');
+if(firstKpi)firstKpi.innerHTML='<b>4.0.1</b><span>stable recovery</span>';
+
+const footer=document.querySelector('footer');
+if(footer)footer.textContent='HardandCore Demo AI · stable recovery build · local processing';
