@@ -29,7 +29,9 @@ else process.env.PORT = previousPort;
 const internalBase = `http://127.0.0.1:${internalPort}`;
 const app = express();
 app.disable('x-powered-by');
-app.use(express.json({ limit: '8mb' }));
+// V8 replay can make the browser-side match object several MB. Accept it here,
+// then explicitly remove replay frames before forwarding the AI request to V7.
+app.use(express.json({ limit: '100mb' }));
 app.use(express.static(publicDir));
 
 const upload = multer({
@@ -134,6 +136,15 @@ function buildReplayForDemo(filePath, base) {
   });
 }
 
+function compactAiRequest(body) {
+  const source = body && typeof body === 'object' ? body : {};
+  const match = source.match && typeof source.match === 'object' ? source.match : {};
+  // Replay contains thousands of all-player position samples and is not consumed by
+  // the current V6.2 AI coach. Keeping it in the request only bloats JSON by MBs.
+  const { replay: _replay, ...matchWithoutReplay } = match;
+  return { ...source, match: matchWithoutReplay };
+}
+
 app.get('/api/health', async (_req, res) => {
   try {
     const response = await fetch(`${internalBase}/api/health`);
@@ -175,10 +186,11 @@ app.post('/api/analyze', upload.single('demo'), async (req, res) => {
 
 app.post('/api/ai', async (req, res) => {
   try {
+    const aiBody = compactAiRequest(req.body);
     const response = await fetch(`${internalBase}/api/ai`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req.body || {}),
+      body: JSON.stringify(aiBody),
     });
     const data = await response.json().catch(() => ({}));
     res.status(response.status).json(data);
