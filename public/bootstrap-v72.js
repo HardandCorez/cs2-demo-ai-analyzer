@@ -1,12 +1,13 @@
 const v9css=document.createElement('link');v9css.rel='stylesheet';v9css.href='/v9.css';document.head.appendChild(v9css);
 const v91css=document.createElement('link');v91css.rel='stylesheet';v91css.href='/v91.css';document.head.appendChild(v91css);
+await import('./v92-progress.js');
 await import('./v9-suite.js');
 await import('./v91-ui.js');
 await import('./visual-coach-v72.js');
 await import('./app.js');
 await import('./zoom-controls-v73.js');
-const brandSub=document.querySelector('.brand-sub');if(brandSub)brandSub.textContent='CS2 demo intelligence · V9.1 Episode Coach';
-const heroEyebrow=document.querySelector('.hero .eyebrow');if(heroEyebrow)heroEyebrow.textContent='REAL .DEM PARSER + SMOOTH 2D REPLAY + EPISODE COACH';
-const heroText=document.querySelector('.hero-copy p');if(heroText)heroText.innerHTML='Загрузи полноценный <strong>.dem</strong>. V9.1 объединяет 2D replay, telemetry и отдельный разбор конкретных критических эпизодов без повторного полного анализа игрока.';
-const firstKpi=document.querySelector('.hero-kpis .mini-card');if(firstKpi)firstKpi.innerHTML='<b>V9.1</b><span>episode coach</span>';
-const footer=document.querySelector('footer');if(footer)footer.textContent='HardandCore Demo AI · V9.1 episode coach · local processing';
+const brandSub=document.querySelector('.brand-sub');if(brandSub)brandSub.textContent='CS2 demo intelligence · V9.2 Fast Parser + Episode Coach';
+const heroEyebrow=document.querySelector('.hero .eyebrow');if(heroEyebrow)heroEyebrow.textContent='REAL .DEM PARSER + FAST REPLAY PIPELINE + EPISODE COACH';
+const heroText=document.querySelector('.hero-copy p');if(heroText)heroText.innerHTML='Загрузи полноценный <strong>.dem</strong>. V9.2 убирает лишний V8 runtime-слой и собирает replay + player state одним parseTicks-проходом, сохраняя 2D replay, telemetry и разбор конкретных эпизодов.';
+const firstKpi=document.querySelector('.hero-kpis .mini-card');if(firstKpi)firstKpi.innerHTML='<b>V9.2</b><span>fast parser</span>';
+const footer=document.querySelector('footer');if(footer)footer.textContent='HardandCore Demo AI · V9.2 fast parser · episode coach · local processing';
