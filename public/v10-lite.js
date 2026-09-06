@@ -2,7 +2,6 @@ import { defaultRadarLayer, getRadarMeta, loadRadarImage, worldToRadarFraction }
 
 const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (m) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;' }[m]));
-const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 
 const state = {
   match: null,
@@ -50,11 +49,12 @@ function selectedPlayerName() {
 }
 
 function episodesForView() {
-  const all = Array.isArray(state.match?.criticalEpisodes) ? state.match.criticalEpisodes : [];
+  const all = Array.isArray(state.match?.replayEpisodes) && state.match.replayEpisodes.length
+    ? state.match.replayEpisodes
+    : Array.isArray(state.match?.criticalEpisodes) ? state.match.criticalEpisodes : [];
   const selected = selectedPlayerName();
-  if (!selected) return all;
-  const mine = all.filter((e) => e.player === selected);
-  return mine.length ? mine : all;
+  if (!selected) return all.slice(0, 30);
+  return all.filter((e) => e.player === selected).slice(0, 30);
 }
 
 function ensurePanel() {
@@ -69,8 +69,8 @@ function ensurePanel() {
     <div class="panel-head">
       <div>
         <div class="eyebrow">V10 LITE · ON-DEMAND EPISODE REPLAY</div>
-        <h3>Критические эпизоды</h3>
-        <div class="hint">Полный replay матча не строится. Загружается только короткое окно вокруг выбранной смерти.</div>
+        <h3>Эпизоды для разбора</h3>
+        <div id="v10LiteHint" class="hint">Полный replay матча не строится. Для выбранного игрока доступны отдельные фрагменты его смертей.</div>
       </div>
     </div>
     <div class="v10-lite-grid">
@@ -89,16 +89,21 @@ function renderEpisodePanel() {
   if (!panel || !state.match) return;
   const box = $('#v10LiteEpisodes');
   const eps = episodesForView();
+  const selected = selectedPlayerName();
+  const hint = $('#v10LiteHint');
+  if (hint) hint.textContent = selected
+    ? `${selected}: ${eps.length} фрагмент${eps.length === 1 ? '' : eps.length < 5 ? 'а' : 'ов'} смертей. WIDE*/REPEEK* отмечены отдельно, остальные доступны как DEATH REVIEW.`
+    : `Доступно ${eps.length} фрагментов. Выбери игрока в scoreboard, чтобы показать только его смерти.`;
   if (!eps.length) {
-    box.innerHTML = '<div class="muted">Критические эпизоды по текущим эвристикам не найдены.</div>';
+    box.innerHTML = '<div class="muted">Для выбранного игрока фрагменты смертей не найдены.</div>';
     return;
   }
   box.innerHTML = eps.map((ep, i) => `
-    <div class="v10-lite-episode ${ep.severity || 'medium'}">
+    <div class="v10-lite-episode ${ep.severity || 'review'}">
       <div>
         <b>R${ep.round} · ${ep.t == null ? '—' : Number(ep.t).toFixed(1) + 'с'}</b>
-        <span>${esc(ep.player)} → смерть от ${esc(ep.attacker || 'соперника')}</span>
-        <div class="v10-lite-tags">${(ep.reasons || []).map((r) => `<i>${esc(r)}</i>`).join('')}</div>
+        <span>${esc(ep.player)} → смерть от ${esc(ep.attacker || 'соперника')}${ep.weapon ? ` · ${esc(ep.weapon)}` : ''}</span>
+        <div class="v10-lite-tags">${(ep.reasons || ['DEATH REVIEW']).map((r) => `<i>${esc(r)}</i>`).join('')}</div>
       </div>
       <button class="ghost-btn" data-replay-index="${i}" type="button">▶ 8с Replay</button>
     </div>`).join('');
@@ -273,7 +278,7 @@ async function drawFrame() {
     ctx.save();
     ctx.fillStyle = 'rgba(255,89,107,.92)';
     ctx.font = '800 13px system-ui';
-    ctx.fillText('МОМЕНТ ОШИБКИ', 18, 28);
+    ctx.fillText('МОМЕНТ СМЕРТИ / ОШИБКИ', 18, 28);
     ctx.restore();
   }
 }
@@ -316,6 +321,11 @@ function syncControls() {
   const label = $('#v10LiteTime');
   if (label) label.textContent = `${state.time >= 0 ? '+' : '−'}${Math.abs(state.time).toFixed(1)}с`;
 }
+
+// Scoreboard is rebuilt by app.js on player selection, so refresh the episode list after the click.
+document.addEventListener('click', (event) => {
+  if (event.target.closest('#scoreBody tr')) setTimeout(renderEpisodePanel, 0);
+});
 
 const observer = new MutationObserver(() => {
   if (state.match && !$('#v10LitePanel')) renderEpisodePanel();
