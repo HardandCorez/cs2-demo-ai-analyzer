@@ -1,9 +1,9 @@
 {
   "name": "hardandcore-cs2-demo-ai",
-  "version": "4.1.0",
+  "version": "4.1.1",
   "private": true,
   "type": "module",
-  "description": "CS2 demo analyzer V10 Lite with stable core analysis and on-demand short episode replay",
+  "description": "CS2 demo analyzer V10 Lite with stable core analysis and on-demand replay for all player death fragments",
   "scripts": {
     "start": "node src/server-v10lite.js",
     "start:ollama-gateway": "node src/ollama-gateway-v62.js",
