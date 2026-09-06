@@ -58,35 +58,45 @@ async function forwardDemo(file) {
   return data;
 }
 
-function buildCriticalEpisodes(base) {
-  const out = [];
-  for (const e of arr(base?.timeline)) {
-    if (!e?.victim || !num(e.tick)) continue;
-    const reasons = [];
-    let score = 0;
-    if (e.repeekLike) { score += 4; reasons.push('REPEEK*'); }
-    if (e.victimWidePeekLike) { score += 3; reasons.push('WIDE*'); }
-    if (e.flashed === true) { score += 2; reasons.push('FLASH'); }
-    if (Number.isFinite(Number(e.nearestTeammateDistance)) && Number(e.nearestTeammateDistance) > 900) {
-      score += 2;
-      reasons.push('FAR FROM TRADE*');
-    }
-    if (score < 3) continue;
-    out.push({
-      id: `${num(e.round)}-${num(e.tick)}-${e.victim}`,
-      round: num(e.round),
-      tick: num(e.tick),
-      t: Number.isFinite(Number(e.secondsIntoRound)) ? Number(e.secondsIntoRound) : null,
-      player: e.victim,
-      attacker: e.attacker || '',
-      weapon: e.weapon || '',
-      reasons,
-      score,
-      severity: score >= 7 ? 'critical' : score >= 5 ? 'high' : 'medium',
-      heuristic: true,
-    });
+function episodeFromDeath(e) {
+  if (!e?.victim || !num(e.tick)) return null;
+  const reasons = [];
+  let score = 0;
+  if (e.repeekLike) { score += 4; reasons.push('REPEEK*'); }
+  if (e.victimWidePeekLike) { score += 3; reasons.push('WIDE*'); }
+  if (e.flashed === true) { score += 2; reasons.push('FLASH'); }
+  if (Number.isFinite(Number(e.nearestTeammateDistance)) && Number(e.nearestTeammateDistance) > 900) {
+    score += 2;
+    reasons.push('FAR FROM TRADE*');
   }
-  return out.sort((a, b) => b.score - a.score || a.round - b.round).slice(0, 16);
+  return {
+    id: `${num(e.round)}-${num(e.tick)}-${e.victim}`,
+    round: num(e.round),
+    tick: num(e.tick),
+    t: Number.isFinite(Number(e.secondsIntoRound)) ? Number(e.secondsIntoRound) : null,
+    player: e.victim,
+    attacker: e.attacker || '',
+    weapon: e.weapon || '',
+    reasons: reasons.length ? reasons : ['DEATH REVIEW'],
+    score,
+    critical: score >= 3,
+    severity: score >= 7 ? 'critical' : score >= 5 ? 'high' : score >= 3 ? 'medium' : 'review',
+    heuristic: score > 0,
+  };
+}
+
+function buildReplayEpisodes(base) {
+  return arr(base?.timeline)
+    .map(episodeFromDeath)
+    .filter(Boolean)
+    .sort((a, b) => a.round - b.round || num(a.t, 999) - num(b.t, 999) || a.tick - b.tick);
+}
+
+function buildCriticalEpisodes(replayEpisodes) {
+  return replayEpisodes
+    .filter((e) => e.critical)
+    .sort((a, b) => b.score - a.score || a.round - b.round)
+    .slice(0, 24);
 }
 
 function sampleTicks(targetTick, beforeSec, afterSec) {
@@ -147,7 +157,7 @@ app.get('/api/health', async (_req, res) => {
     res.status(response.ok ? 200 : 502).json({
       ...data,
       ok: response.ok && data?.ok !== false,
-      build: 'v10-lite-4.1',
+      build: 'v10-lite-4.1.1',
       episodeReplayLite: true,
       fullMatchReplay: false,
     });
@@ -160,13 +170,16 @@ app.post('/api/analyze', upload.single('demo'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Файл .dem не получен' });
   try {
     const base = await forwardDemo(req.file);
-    const criticalEpisodes = buildCriticalEpisodes(base);
+    const replayEpisodes = buildReplayEpisodes(base);
+    const criticalEpisodes = buildCriticalEpisodes(replayEpisodes);
     res.json({
       ...base,
+      replayEpisodes,
       criticalEpisodes,
-      build: 'v10-lite-4.1',
+      build: 'v10-lite-4.1.1',
       dataAvailability: {
         ...(base.dataAvailability || {}),
+        replayEpisodes: replayEpisodes.length > 0,
         criticalEpisodes: criticalEpisodes.length > 0,
         episodeReplayLite: true,
         fullMatchReplay: false,
@@ -242,7 +255,7 @@ app.use((error, _req, res, _next) => {
 });
 
 app.listen(publicPort, '127.0.0.1', () => {
-  console.log(`CS2 Demo AI Analyzer V10 Lite: http://localhost:${publicPort}`);
+  console.log(`CS2 Demo AI Analyzer V10 Lite 4.1.1: http://localhost:${publicPort}`);
   console.log(`Stable core internal: ${internalBase}`);
-  console.log(`Episode replay: on-demand only, ${replayHz} fps, ±4s default`);
+  console.log(`Episode replay: all deaths available on demand, ${replayHz} fps, ±4s default`);
 });
