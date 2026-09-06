@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="/v71.css" />
   <link rel="stylesheet" href="/v72.css" />
   <link rel="stylesheet" href="/v73.css" />
+  <link rel="stylesheet" href="/replay-v8.css" />
 </head>
 <body>
   <div class="noise"></div>
@@ -18,7 +19,7 @@
       <div class="brand-mark">HC</div>
       <div>
         <div class="brand-title">HardandCore Demo AI</div>
-        <div class="brand-sub">CS2 demo intelligence · V7.3 Visual Coach</div>
+        <div class="brand-sub">CS2 demo intelligence · V8 2D Replay + Visual Coach</div>
       </div>
     </div>
     <div class="status" id="healthStatus"><span class="dot"></span> Проверка сервера…</div>
@@ -27,13 +28,13 @@
   <main class="shell">
     <section class="hero">
       <div class="hero-copy">
-        <div class="eyebrow">REAL .DEM PARSER + LOCAL AI + VISUAL COACH V7.3</div>
+        <div class="eyebrow">REAL .DEM PARSER + FULL 2D REPLAY + LOCAL AI</div>
         <h1>Разбирай демки CS2<br><span>как аналитик команды.</span></h1>
-        <p>Загрузи полноценный <strong>.dem</strong>. Сайт считает K/D, ADR, opening, trades, KAST, multikills, clutch и timing, рисует события на настоящем radar, показывает траекторию перед смертью и накладывает визуальный вариант более безопасного решения прямо на карту.</p>
+        <p>Загрузи полноценный <strong>.dem</strong>. V8 воспроизводит раунды на настоящем radar со всеми игроками, событиями убийств и бомбы, а V7.4 Visual Coach показывает более безопасный вариант решения в выбранном эпизоде.</p>
       </div>
       <div class="hero-kpis">
-        <div class="mini-card"><b>V7.3</b><span>visual coach</span></div>
-        <div class="mini-card"><b>3s</b><span>death trajectory</span></div>
+        <div class="mini-card"><b>V8</b><span>2D round replay</span></div>
+        <div class="mini-card"><b>10</b><span>players on radar</span></div>
         <div class="mini-card"><b>AI</b><span>prescriptive coach</span></div>
       </div>
     </section>
@@ -42,10 +43,7 @@
       <input id="demoInput" type="file" accept=".dem" hidden />
       <div class="drop-zone" id="dropZone" tabindex="0" role="button" aria-label="Загрузить демку CS2">
         <div class="upload-icon">↑</div>
-        <div>
-          <h2>Перетащи сюда .dem</h2>
-          <p>или нажми, чтобы выбрать файл</p>
-        </div>
+        <div><h2>Перетащи сюда .dem</h2><p>или нажми, чтобы выбрать файл</p></div>
         <button class="primary" id="chooseBtn" type="button">Выбрать демку</button>
       </div>
       <div class="progress-wrap hidden" id="progressWrap">
@@ -56,109 +54,40 @@
     </section>
 
     <section class="results hidden" id="results">
-      <div class="match-head">
-        <div>
-          <div class="eyebrow">MATCH OVERVIEW</div>
-          <h2 id="matchTitle">Матч</h2>
-          <p id="matchMeta"></p>
-        </div>
-        <div class="match-badges" id="matchBadges"></div>
-      </div>
-
+      <div class="match-head"><div><div class="eyebrow">MATCH OVERVIEW</div><h2 id="matchTitle">Матч</h2><p id="matchMeta"></p></div><div class="match-badges" id="matchBadges"></div></div>
       <div class="grid metrics" id="metrics"></div>
 
       <div class="panel">
-        <div class="panel-head">
-          <div>
-            <div class="eyebrow">SCOREBOARD</div>
-            <h3>Игроки</h3>
-          </div>
-          <div class="hint">Нажми на игрока → radar + AI-разбор</div>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>#</th><th>Игрок</th><th>K</th><th>D</th><th>A</th><th>K/D</th><th>ADR</th><th>HS%</th><th>KAST</th><th>Trades</th><th>Entry</th><th>Open D</th>
-              </tr>
-            </thead>
-            <tbody id="scoreBody"></tbody>
-          </table>
-        </div>
+        <div class="panel-head"><div><div class="eyebrow">SCOREBOARD</div><h3>Игроки</h3></div><div class="hint">Нажми на игрока → radar + AI-разбор</div></div>
+        <div class="table-wrap"><table><thead><tr><th>#</th><th>Игрок</th><th>K</th><th>D</th><th>A</th><th>K/D</th><th>ADR</th><th>HS%</th><th>KAST</th><th>Trades</th><th>Entry</th><th>Open D</th></tr></thead><tbody id="scoreBody"></tbody></table></div>
       </div>
 
       <div class="panel positioning-panel">
         <div class="panel-head radar-head">
-          <div>
-            <div class="eyebrow">REAL RADAR V7.3 · VISUAL COACH</div>
-            <h3>Интерактивная карта событий и правильного решения</h3>
-            <div class="radar-status" id="radarStatus">Ищем radar для карты…</div>
-          </div>
+          <div><div class="eyebrow">REAL RADAR · V7.4 VISUAL COACH</div><h3>Интерактивная карта событий и правильного решения</h3><div class="radar-status" id="radarStatus">Ищем radar для карты…</div></div>
           <div class="radar-controls">
-            <select id="radarRound" aria-label="Фильтр по раунду">
-              <option value="all">Все раунды</option>
-            </select>
-            <select id="radarLayer" aria-label="Этаж radar map">
-              <option value="all">Все уровни</option>
-            </select>
-            <select id="positionMode" aria-label="Режим positioning map">
-              <option value="both">Фраги + смерти</option>
-              <option value="deaths">Только смерти</option>
-              <option value="kills">Только фраги</option>
-              <option value="wide">Только WIDE*</option>
-              <option value="repeek">Только REPEEK*</option>
-            </select>
+            <select id="radarRound" aria-label="Фильтр по раунду"><option value="all">Все раунды</option></select>
+            <select id="radarLayer" aria-label="Этаж radar map"><option value="all">Все уровни</option></select>
+            <select id="positionMode" aria-label="Режим positioning map"><option value="both">Фраги + смерти</option><option value="deaths">Только смерти</option><option value="kills">Только фраги</option><option value="wide">Только WIDE*</option><option value="repeek">Только REPEEK*</option></select>
             <label class="radar-toggle"><input id="trajectoryToggle" type="checkbox" checked /> траектория 3с</label>
-            <button class="ghost-btn" id="radarReset" type="button">Сброс вида</button>
-            <span class="zoom-readout" id="radarZoom">100%</span>
+            <button class="ghost-btn" id="radarReset" type="button">Сброс вида</button><span class="zoom-readout" id="radarZoom">100%</span>
           </div>
         </div>
         <div class="position-summary" id="positionSummary"></div>
-        <div class="position-canvas-wrap" id="positionCanvasWrap">
-          <canvas id="positionCanvas" aria-label="Интерактивный radar map с фрагами, смертями и peek-флагами"></canvas>
-          <div class="position-tooltip hidden" id="positionTooltip"></div>
-          <div class="position-empty hidden" id="positionEmpty">В этой демке координаты событий недоступны.</div>
-        </div>
+        <div class="position-canvas-wrap" id="positionCanvasWrap"><canvas id="positionCanvas" aria-label="Интерактивный radar map"></canvas><div class="position-tooltip hidden" id="positionTooltip"></div><div class="position-empty hidden" id="positionEmpty">В этой демке координаты событий недоступны.</div></div>
         <div class="radar-detail hidden" id="radarDetail"></div>
-        <div class="radar-help">Приближение: кнопки − / + или колесо мыши · зажми ЛКМ и тащи — pan · клик по смерти — траектория + визуальный coach · двойной клик — сброс вида.</div>
-        <div class="position-legend">
-          <span><i class="legend-dot death-dot"></i> смерти</span>
-          <span><i class="legend-dot kill-dot"></i> фраги</span>
-          <span><i class="peek-legend-ring"></i> WIDE*</span>
-          <span><i class="repeek-legend-box"></i> REPEEK*</span>
-          <span><i class="traj-legend-line"></i> траектория перед смертью</span>
-          <span class="muted">V7.3 накладывает safe-default решение на реальные координаты. WIDE/REPEEK остаются эвристиками, а рекомендованный путь не является navmesh/LOS расчётом.</span>
-        </div>
+        <div class="radar-help">Приближение: кнопки − / + или колесо · drag — pan · клик по смерти — траектория + схема решения.</div>
+        <div class="position-legend"><span><i class="legend-dot death-dot"></i> смерти</span><span><i class="legend-dot kill-dot"></i> фраги</span><span><i class="peek-legend-ring"></i> WIDE*</span><span><i class="repeek-legend-box"></i> REPEEK*</span><span><i class="traj-legend-line"></i> траектория</span><span class="muted">WIDE/REPEEK — эвристики.</span></div>
       </div>
 
       <div class="two-col">
-        <div class="panel">
-          <div class="panel-head">
-            <div>
-              <div class="eyebrow">DUEL TIMELINE</div>
-              <h3>Убийства</h3>
-            </div>
-            <select id="timelineFilter"></select>
-          </div>
-          <div class="timeline" id="timeline"></div>
-        </div>
-
-        <div class="panel ai-panel">
-          <div class="panel-head">
-            <div>
-              <div class="eyebrow">LOCAL PRESCRIPTIVE COACH · V6.2</div>
-              <h3>AI-разбор</h3>
-            </div>
-          </div>
-          <div class="selected-player" id="selectedPlayer">Выбери игрока в таблице</div>
-          <button class="primary full" id="aiBtn" type="button" disabled>Запустить AI-анализ</button>
-          <div class="ai-output muted" id="aiOutput">Здесь появятся подтверждённые метрики и конкретный safe-default план действий.</div>
-        </div>
+        <div class="panel"><div class="panel-head"><div><div class="eyebrow">DUEL TIMELINE</div><h3>Убийства</h3></div><select id="timelineFilter"></select></div><div class="timeline" id="timeline"></div></div>
+        <div class="panel ai-panel"><div class="panel-head"><div><div class="eyebrow">LOCAL PRESCRIPTIVE COACH · V6.2</div><h3>AI-разбор</h3></div></div><div class="selected-player" id="selectedPlayer">Выбери игрока в таблице</div><button class="primary full" id="aiBtn" type="button" disabled>Запустить AI-анализ</button><div class="ai-output muted" id="aiOutput">Здесь появятся подтверждённые метрики и конкретный safe-default план действий.</div></div>
       </div>
     </section>
   </main>
 
-  <footer>HardandCore Demo AI · локальная обработка .dem + Ollama · V7.3 visual coach + manual zoom controls</footer>
+  <footer>HardandCore Demo AI · V8 2D replay + V7.4 visual coach + local Ollama</footer>
   <script type="module" src="/bootstrap-v72.js"></script>
 </body>
 </html>
