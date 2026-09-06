@@ -1,14 +1,14 @@
 {
   "name": "hardandcore-cs2-demo-ai",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
   "type": "module",
-  "description": "CS2 demo analyzer with V8 full 2D round replay, V7.4 visual coaching, real radar and local Ollama",
+  "description": "CS2 demo analyzer V9 with smooth 2D replay, utility, duel/aim telemetry, critical episodes and local episode AI coaching",
   "scripts": {
-    "start": "node src/server-v8.js",
+    "start": "node src/server-v9.js",
     "start:ollama-gateway": "node src/ollama-gateway-v62.js",
-    "dev": "node --watch src/server-v8.js",
-    "check": "node --check src/server.js && node --check src/server-v71.js && node --check src/server-v8.js && node --check src/v5-metrics.js && node --check src/v6-positioning.js && node --check src/v71-trajectories.js && node --check src/v8-replay.js && node --check src/ollama-gateway-v61.js && node --check src/ollama-gateway-v62.js && node --check public/radar-catalog.js && node --check public/replay-v8.js && node --check public/visual-coach-v72.js && node --check public/zoom-controls-v73.js && node --check public/bootstrap-v72.js && node --check public/app.js"
+    "dev": "node --watch src/server-v9.js",
+    "check": "node --check src/server.js && node --check src/server-v71.js && node --check src/server-v8.js && node --check src/server-v9.js && node --check src/v5-metrics.js && node --check src/v6-positioning.js && node --check src/v71-trajectories.js && node --check src/v8-replay.js && node --check src/ollama-gateway-v61.js && node --check src/ollama-gateway-v62.js && node --check public/radar-catalog.js && node --check public/v9-suite.js && node --check public/visual-coach-v72.js && node --check public/zoom-controls-v73.js && node --check public/bootstrap-v72.js && node --check public/app.js"
   },
   "engines": {
     "node": ">=20"
