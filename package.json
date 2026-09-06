@@ -1,14 +1,14 @@
 {
   "name": "hardandcore-cs2-demo-ai",
-  "version": "3.2.0",
+  "version": "4.0.0",
   "private": true,
   "type": "module",
-  "description": "CS2 demo analyzer V9.2 with faster replay/state parsing, smooth 2D replay, telemetry and episode coaching",
+  "description": "CS2 demo analyzer V10 with episode-linked AI Replay Coach, 2D replay, telemetry and local coaching",
   "scripts": {
     "start": "node src/server-v92.js",
     "start:ollama-gateway": "node src/ollama-gateway-v62.js",
     "dev": "node --watch src/server-v92.js",
-    "check": "node --check src/server.js && node --check src/server-v71.js && node --check src/server-v8.js && node --check src/server-v9.js && node --check src/server-v92.js && node --check src/v5-metrics.js && node --check src/v6-positioning.js && node --check src/v71-trajectories.js && node --check src/v8-replay.js && node --check src/ollama-gateway-v61.js && node --check src/ollama-gateway-v62.js && node --check public/radar-catalog.js && node --check public/v9-suite.js && node --check public/v92-progress.js && node --check public/visual-coach-v72.js && node --check public/zoom-controls-v73.js && node --check public/bootstrap-v72.js && node --check public/app.js"
+    "check": "node --check src/server.js && node --check src/server-v71.js && node --check src/server-v8.js && node --check src/server-v9.js && node --check src/server-v92.js && node --check src/v5-metrics.js && node --check src/v6-positioning.js && node --check src/v71-trajectories.js && node --check src/v8-replay.js && node --check src/ollama-gateway-v61.js && node --check src/ollama-gateway-v62.js && node --check public/radar-catalog.js && node --check public/v9-suite.js && node --check public/v91-ui.js && node --check public/v92-progress.js && node --check public/v10-replay-coach.js && node --check public/visual-coach-v72.js && node --check public/zoom-controls-v73.js && node --check public/bootstrap-v72.js && node --check public/app.js"
   },
   "engines": {
     "node": ">=20"
