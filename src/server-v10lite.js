@@ -150,6 +150,109 @@ function normalizeFrames(rows, targetTick) {
   }));
 }
 
+function distance2d(a, b) {
+  if (!a || !b) return null;
+  const dx = Number(a.x) - Number(b.x), dy = Number(a.y) - Number(b.y);
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return null;
+  return Math.hypot(dx, dy);
+}
+
+function nearestFrame(frames, targetT) {
+  const list = arr(frames);
+  if (!list.length) return null;
+  let best = list[0], bestD = Math.abs(num(best.t) - targetT);
+  for (const frame of list) {
+    const d = Math.abs(num(frame.t) - targetT);
+    if (d < bestD) { best = frame; bestD = d; }
+  }
+  return best;
+}
+
+function facingErrorDeg(victim, attacker) {
+  if (!victim || !attacker || !Number.isFinite(Number(victim.yaw))) return null;
+  const bearing = Math.atan2(Number(attacker.y) - Number(victim.y), Number(attacker.x) - Number(victim.x)) * 180 / Math.PI;
+  let diff = bearing - Number(victim.yaw);
+  while (diff > 180) diff -= 360;
+  while (diff < -180) diff += 360;
+  return Math.abs(diff);
+}
+
+function buildEpisodeCoach(episode, replay) {
+  const frames = arr(replay?.frames);
+  const before = [...frames].filter((f) => num(f.t) <= -0.05).at(-1) || nearestFrame(frames, 0);
+  const earlier = nearestFrame(frames, -1.5);
+  const victimBefore = arr(before?.players).find((p) => p.name === episode.player);
+  const attackerBefore = arr(before?.players).find((p) => p.name === episode.attacker);
+  const victimEarlier = arr(earlier?.players).find((p) => p.name === episode.player);
+  const teammateDistances = arr(before?.players)
+    .filter((p) => victimBefore && p.name !== victimBefore.name && p.alive !== false && Number(p.teamNumber) === Number(victimBefore.teamNumber))
+    .map((p) => distance2d(victimBefore, p))
+    .filter(Number.isFinite);
+  const nearestTeammateDistance = teammateDistances.length ? Math.min(...teammateDistances) : null;
+  const duelDistance = distance2d(victimBefore, attackerBefore);
+  const movementLast1_5s = distance2d(victimEarlier, victimBefore);
+  const facingError = facingErrorDeg(victimBefore, attackerBefore);
+  const hpBeforeDeath = Number.isFinite(Number(victimBefore?.hp)) ? Number(victimBefore.hp) : null;
+  const reasons = arr(episode.reasons);
+
+  const why = [];
+  const risks = [];
+  const plan = [];
+
+  if (reasons.includes('REPEEK*')) {
+    why.push('Эпизод отмечен как REPEEK*: повторный выход после предыдущего контакта выглядит предсказуемым по эвристике.');
+    risks.push('Соперник может уже держать тот же угол и ожидать повторного появления.');
+    plan.push('После первого контакта разорви линию: уйди за укрытие и сбрось тайминг.');
+    plan.push('Повторно открывай угол только после новой информации, флешки или контакта тиммейта.');
+  }
+  if (reasons.includes('WIDE*')) {
+    why.push('Эпизод отмечен как WIDE*: траектория похожа на широкий выход, но это эвристика, а не доказанная ошибка.');
+    risks.push('Широкий выход может открыть сразу несколько потенциальных углов и ухудшить возможность быстро уйти назад.');
+    plan.push('Открывай пространство поэтапно: один сектор за раз, сохраняя путь назад к укрытию.');
+    plan.push('Перед точным выстрелом стабилизируй движение вместо продолжения широкого свинга.');
+  }
+  if (reasons.includes('FLASH')) {
+    why.push('На смерти был активен эффект флешки.');
+    risks.push('Контакт во время ослепления резко снижает качество первого выстрела и чтение второго противника.');
+    plan.push('Если есть укрытие, пережди остаток флешки и только затем возвращай контакт.');
+  }
+  if (reasons.includes('FAR FROM TRADE*')) {
+    why.push('Эпизод отмечен как FAR FROM TRADE*: расстояние до ближайшего живого тиммейта было большим по позиционной эвристике.');
+    risks.push('В случае проигранной дуэли размен может быть слишком поздним или невозможным.');
+    plan.push('До контакта сократи разрыв с ближайшим тиммейтом или выбери угол, который он реально сможет разменять.');
+  }
+  if (!why.length) {
+    why.push('Это DEATH REVIEW: отдельная эвристика WIDE/REPEEK/FLASH/FAR FROM TRADE здесь не сработала.');
+    risks.push('По одним координатам нельзя доказать конкретную ошибку, поэтому разбор ограничен безопасными принципами принятия дуэли.');
+    plan.push('Перед контактом оставь себе понятный путь назад к укрытию и старайся изолировать одну дуэль.');
+    plan.push('После обнаружения соперника не повторяй тот же тайминг автоматически — сначала обнови информацию или позицию.');
+  }
+
+  if (Number.isFinite(nearestTeammateDistance) && nearestTeammateDistance > 900 && !reasons.includes('FAR FROM TRADE*')) {
+    risks.push(`В коротком replay ближайший живой тиммейт был примерно в ${Math.round(nearestTeammateDistance)}u — это дополнительный признак слабой разменной структуры.`);
+  }
+  if (Number.isFinite(facingError) && facingError > 75) {
+    risks.push(`Примерная 2D разница между yaw игрока и направлением на соперника перед смертью: ${Math.round(facingError)}°. Это контекст, не полноценный LOS-анализ.`);
+  }
+
+  return {
+    episodeOnly: true,
+    provider: 'deterministic-safe-default-v10-lite-4.2',
+    title: `R${episode.round} · ${episode.player} vs ${episode.attacker || 'opponent'}`,
+    why,
+    risks,
+    plan: [...new Set(plan)].slice(0, 5),
+    evidence: {
+      hpBeforeDeath,
+      duelDistance2d: Number.isFinite(duelDistance) ? Math.round(duelDistance) : null,
+      nearestTeammateDistance2d: Number.isFinite(nearestTeammateDistance) ? Math.round(nearestTeammateDistance) : null,
+      movementLast1_5s2d: Number.isFinite(movementLast1_5s) ? Math.round(movementLast1_5s) : null,
+      facingErrorDeg2d: Number.isFinite(facingError) ? Math.round(facingError) : null,
+    },
+    limits: 'Safe-default coach: navmesh, стены и line-of-sight не моделируются. WIDE*/REPEEK*/trade-distance остаются эвристиками.',
+  };
+}
+
 app.get('/api/health', async (_req, res) => {
   try {
     const response = await fetch(`${internalBase}/api/health`);
@@ -157,8 +260,9 @@ app.get('/api/health', async (_req, res) => {
     res.status(response.ok ? 200 : 502).json({
       ...data,
       ok: response.ok && data?.ok !== false,
-      build: 'v10-lite-4.1.1',
+      build: 'v10-lite-4.2.0',
       episodeReplayLite: true,
+      episodeCoachLite: true,
       fullMatchReplay: false,
     });
   } catch (error) {
@@ -176,12 +280,13 @@ app.post('/api/analyze', upload.single('demo'), async (req, res) => {
       ...base,
       replayEpisodes,
       criticalEpisodes,
-      build: 'v10-lite-4.1.1',
+      build: 'v10-lite-4.2.0',
       dataAvailability: {
         ...(base.dataAvailability || {}),
         replayEpisodes: replayEpisodes.length > 0,
         criticalEpisodes: criticalEpisodes.length > 0,
         episodeReplayLite: true,
+        episodeCoachLite: true,
         fullMatchReplay: false,
       },
     });
@@ -232,6 +337,20 @@ app.post('/api/episode-replay', upload.single('demo'), async (req, res) => {
   }
 });
 
+app.post('/api/episode-coach', (req, res) => {
+  const episode = req.body?.episode;
+  const replay = req.body?.replay;
+  if (!episode?.player || !Array.isArray(replay?.frames) || !replay.frames.length) {
+    return res.status(400).json({ error: 'Нет данных выбранного эпизода/replay для coach-разбора' });
+  }
+  try {
+    res.json(buildEpisodeCoach(episode, replay));
+  } catch (error) {
+    console.error(error);
+    res.status(422).json({ error: error?.message || 'Не удалось построить разбор эпизода' });
+  }
+});
+
 app.post('/api/ai', async (req, res) => {
   try {
     const response = await fetch(`${internalBase}/api/ai`, {
@@ -255,7 +374,8 @@ app.use((error, _req, res, _next) => {
 });
 
 app.listen(publicPort, '127.0.0.1', () => {
-  console.log(`CS2 Demo AI Analyzer V10 Lite 4.1.1: http://localhost:${publicPort}`);
+  console.log(`CS2 Demo AI Analyzer V10 Lite 4.2.0: http://localhost:${publicPort}`);
   console.log(`Stable core internal: ${internalBase}`);
   console.log(`Episode replay: all deaths available on demand, ${replayHz} fps, ±4s default`);
+  console.log('Episode coach: deterministic safe-default, selected episode only');
 });
