@@ -9,6 +9,7 @@ const state = {
   selectedPlayerId: null,
   episode: null,
   replay: null,
+  coach: null,
   meta: null,
   time: -4,
   playing: false,
@@ -35,6 +36,7 @@ window.fetch = async (...args) => {
         state.selectedPlayerId = String(data?.players?.[0]?.steamid || data?.players?.[0]?.name || '');
         state.episode = null;
         state.replay = null;
+        state.coach = null;
         try { state.meta = data?.map ? await getRadarMeta(data.map) : null; } catch { state.meta = null; }
         setTimeout(renderEpisodePanel, 0);
       }).catch(() => {});
@@ -67,6 +69,7 @@ function setSelectedPlayer(id, { clearViewer = true } = {}) {
     stopAnimation();
     state.episode = null;
     state.replay = null;
+    state.coach = null;
     renderViewerMessage('Выбери эпизод нового игрока и нажми «▶ 8с Replay».');
   }
   renderEpisodePanel();
@@ -92,7 +95,7 @@ function ensurePanel() {
   panel.innerHTML = `
     <div class="panel-head">
       <div>
-        <div class="eyebrow">V10 LITE · ON-DEMAND EPISODE REPLAY</div>
+        <div class="eyebrow">V10 LITE · EPISODE REPLAY + SAFE-DEFAULT COACH</div>
         <h3>Эпизоды для разбора</h3>
         <div id="v10LiteHint" class="hint">Полный replay матча не строится. Для выбранного игрока доступны отдельные фрагменты его смертей.</div>
       </div>
@@ -136,7 +139,7 @@ function renderEpisodePanel() {
   const selected = selectedPlayerName();
   const hint = $('#v10LiteHint');
   if (hint) hint.textContent = selected
-    ? `${selected}: ${eps.length} фрагмент${eps.length === 1 ? '' : eps.length < 5 ? 'а' : 'ов'} смертей. WIDE*/REPEEK* отмечены отдельно, остальные доступны как DEATH REVIEW.`
+    ? `${selected}: ${eps.length} фрагмент${eps.length === 1 ? '' : eps.length < 5 ? 'а' : 'ов'} смертей. Replay и coach-разбор загружаются только для выбранного момента.`
     : `Доступно ${eps.length} фрагментов. Выбери игрока в scoreboard или в списке справа.`;
   if (!eps.length) {
     box.innerHTML = '<div class="muted">Для выбранного игрока фрагменты смертей не найдены.</div>';
@@ -149,7 +152,7 @@ function renderEpisodePanel() {
         <span>${esc(ep.player)} → смерть от ${esc(ep.attacker || 'соперника')}${ep.weapon ? ` · ${esc(ep.weapon)}` : ''}</span>
         <div class="v10-lite-tags">${(ep.reasons || ['DEATH REVIEW']).map((r) => `<i>${esc(r)}</i>`).join('')}</div>
       </div>
-      <button class="ghost-btn" data-replay-index="${i}" type="button">▶ 8с Replay</button>
+      <button class="ghost-btn" data-replay-index="${i}" type="button">▶ 8с Replay + Coach</button>
     </div>`).join('');
   box.querySelectorAll('[data-replay-index]').forEach((btn) => btn.addEventListener('click', () => loadEpisodeReplay(eps[Number(btn.dataset.replayIndex)], btn)));
 }
@@ -161,6 +164,7 @@ async function loadEpisodeReplay(ep, button) {
   }
   state.episode = ep;
   state.replay = null;
+  state.coach = null;
   state.playing = false;
   stopAnimation();
   const old = button.textContent;
@@ -181,6 +185,7 @@ async function loadEpisodeReplay(ep, button) {
     state.time = -Number(data.beforeSec || 4);
     renderViewer();
     drawFrame();
+    loadEpisodeCoach();
     $('#v10LitePanel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (error) {
     renderViewerMessage(`Replay эпизода недоступен: ${error.message || error}`);
@@ -188,6 +193,54 @@ async function loadEpisodeReplay(ep, button) {
     button.disabled = false;
     button.textContent = old;
   }
+}
+
+async function loadEpisodeCoach() {
+  const box = $('#v10LiteCoach');
+  if (!box || !state.episode || !state.replay) return;
+  box.innerHTML = '<div class="muted">Разбираем только выбранный эпизод…</div>';
+  try {
+    const response = await originalFetch('/api/episode-coach', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ episode: state.episode, replay: state.replay }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    state.coach = data;
+    renderCoach();
+  } catch (error) {
+    box.innerHTML = `<div class="v10-coach-error">Coach-разбор недоступен: ${esc(error.message || error)}</div>`;
+  }
+}
+
+function evidenceCards(evidence = {}) {
+  const rows = [
+    ['HP перед смертью', evidence.hpBeforeDeath == null ? '—' : evidence.hpBeforeDeath],
+    ['Дистанция дуэли*', evidence.duelDistance2d == null ? '—' : `${evidence.duelDistance2d}u`],
+    ['Ближайший тиммейт*', evidence.nearestTeammateDistance2d == null ? '—' : `${evidence.nearestTeammateDistance2d}u`],
+    ['Движение за 1.5с*', evidence.movementLast1_5s2d == null ? '—' : `${evidence.movementLast1_5s2d}u`],
+    ['Facing error*', evidence.facingErrorDeg2d == null ? '—' : `${evidence.facingErrorDeg2d}°`],
+  ];
+  return rows.map(([label, value]) => `<div><span>${esc(label)}</span><b>${esc(value)}</b></div>`).join('');
+}
+
+function renderCoach() {
+  const box = $('#v10LiteCoach');
+  const coach = state.coach;
+  if (!box || !coach) return;
+  box.innerHTML = `
+    <div class="v10-coach-head">
+      <div><div class="eyebrow">EPISODE-ONLY COACH</div><h4>Что произошло и как сыграть безопаснее</h4></div>
+      <span class="v10-coach-mode">SAFE-DEFAULT</span>
+    </div>
+    <div class="v10-coach-evidence">${evidenceCards(coach.evidence)}</div>
+    <div class="v10-coach-columns">
+      <section><h5>Почему отмечен</h5>${(coach.why || []).map((x) => `<p>${esc(x)}</p>`).join('')}</section>
+      <section><h5>Риск</h5>${(coach.risks || []).map((x) => `<p>${esc(x)}</p>`).join('')}</section>
+    </div>
+    <div class="v10-coach-plan"><h5>Как сыграть вместо этого</h5><ol>${(coach.plan || []).map((x) => `<li>${esc(x)}</li>`).join('')}</ol></div>
+    <div class="position-disclaimer">${esc(coach.limits || '')}</div>`;
 }
 
 function renderViewerMessage(text) {
@@ -212,6 +265,7 @@ function renderViewer() {
       <input id="v10LiteRange" type="range" min="-${Number(r.beforeSec || 4)}" max="${Number(r.afterSec || 4)}" step="0.05" value="-${Number(r.beforeSec || 4)}" />
       <span id="v10LiteTime">−${Number(r.beforeSec || 4).toFixed(1)}с</span>
     </div>
+    <div id="v10LiteCoach" class="v10-lite-coach"><div class="muted">Готовим coach-разбор выбранного эпизода…</div></div>
     <div class="position-disclaimer">V10 Lite показывает только координаты короткого окна. WIDE*/REPEEK* — эвристики; navmesh и line-of-sight не используются.</div>`;
   $('#v10LitePlay')?.addEventListener('click', togglePlay);
   $('#v10LiteError')?.addEventListener('click', () => { state.playing = false; stopAnimation(); state.time = 0; syncControls(); drawFrame(); });
