@@ -7,16 +7,16 @@ await import('./app.js');
 await import('./v10-lite.js');
 
 const brandSub=document.querySelector('.brand-sub');
-if(brandSub)brandSub.textContent='CS2 demo intelligence · V10 Lite 4.1.2';
+if(brandSub)brandSub.textContent='CS2 demo intelligence · V10 Lite 4.2';
 
 const heroEyebrow=document.querySelector('.hero .eyebrow');
-if(heroEyebrow)heroEyebrow.textContent='REAL .DEM PARSER · STABLE CORE + PER-PLAYER EPISODE REPLAY';
+if(heroEyebrow)heroEyebrow.textContent='REAL .DEM PARSER · PER-PLAYER EPISODE REPLAY + SAFE-DEFAULT COACH';
 
 const heroText=document.querySelector('.hero-copy p');
-if(heroText)heroText.innerHTML='Загрузи полноценный <strong>.dem</strong>. Базовый анализ остаётся на стабильном ядре. V10 Lite позволяет переключать любого игрока и открывать отдельные 8-секундные replay-фрагменты его смертей; критические WIDE*/REPEEK* помечаются отдельно.';
+if(heroText)heroText.innerHTML='Загрузи полноценный <strong>.dem</strong>. Базовый анализ остаётся на стабильном ядре. Для любого игрока V10 Lite открывает отдельный 8-секундный replay и сразу разбирает только этот эпизод: почему он рискованный и какой safe-default вариант выбрать вместо него.';
 
 const firstKpi=document.querySelector('.hero-kpis .mini-card');
-if(firstKpi)firstKpi.innerHTML='<b>V10 Lite</b><span>per-player replay</span>';
+if(firstKpi)firstKpi.innerHTML='<b>V10 Lite</b><span>episode coach</span>';
 
 const footer=document.querySelector('footer');
-if(footer)footer.textContent='HardandCore Demo AI · V10 Lite 4.1.2 · stable core + per-player episode replay';
+if(footer)footer.textContent='HardandCore Demo AI · V10 Lite 4.2 · stable core + episode-only coach';
