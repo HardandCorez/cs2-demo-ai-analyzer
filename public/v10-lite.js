@@ -6,6 +6,7 @@ const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (m) => ({ '&':'&amp;', '<
 const state = {
   match: null,
   file: null,
+  selectedPlayerId: null,
   episode: null,
   replay: null,
   meta: null,
@@ -31,6 +32,7 @@ window.fetch = async (...args) => {
     if (/\/api\/analyze(?:\?|$)/.test(url) && response.ok) {
       response.clone().json().then(async (data) => {
         state.match = data;
+        state.selectedPlayerId = String(data?.players?.[0]?.steamid || data?.players?.[0]?.name || '');
         state.episode = null;
         state.replay = null;
         try { state.meta = data?.map ? await getRadarMeta(data.map) : null; } catch { state.meta = null; }
@@ -41,11 +43,33 @@ window.fetch = async (...args) => {
   return response;
 };
 
+function playerById(id) {
+  if (!state.match) return null;
+  return state.match.players?.find((p) => String(p.steamid || p.name) === String(id)) || null;
+}
+
 function selectedPlayerName() {
+  if (!state.match) return '';
+  const explicit = playerById(state.selectedPlayerId);
+  if (explicit) return explicit.name || '';
   const row = document.querySelector('#scoreBody tr.selected');
-  if (!row || !state.match) return '';
-  const id = String(row.dataset.id || '');
-  return state.match.players?.find((p) => String(p.steamid || p.name) === id)?.name || '';
+  if (!row) return '';
+  return playerById(row.dataset.id)?.name || '';
+}
+
+function setSelectedPlayer(id, { clearViewer = true } = {}) {
+  const next = String(id || '');
+  if (!next || !playerById(next)) return;
+  const changed = next !== String(state.selectedPlayerId || '');
+  state.selectedPlayerId = next;
+  if (changed && clearViewer) {
+    state.playing = false;
+    stopAnimation();
+    state.episode = null;
+    state.replay = null;
+    renderViewerMessage('Выбери эпизод нового игрока и нажми «▶ 8с Replay».');
+  }
+  renderEpisodePanel();
 }
 
 function episodesForView() {
@@ -72,6 +96,7 @@ function ensurePanel() {
         <h3>Эпизоды для разбора</h3>
         <div id="v10LiteHint" class="hint">Полный replay матча не строится. Для выбранного игрока доступны отдельные фрагменты его смертей.</div>
       </div>
+      <select id="v10LitePlayerSelect" aria-label="Игрок для V10 Lite"></select>
     </div>
     <div class="v10-lite-grid">
       <div id="v10LiteEpisodes" class="v10-lite-episodes"></div>
@@ -81,19 +106,38 @@ function ensurePanel() {
     </div>`;
   const twoCol = $('.two-col');
   (twoCol || results.lastElementChild)?.insertAdjacentElement('beforebegin', panel);
+  $('#v10LitePlayerSelect')?.addEventListener('change', (event) => {
+    const id = String(event.target.value || '');
+    setSelectedPlayer(id);
+    const scoreboardRow = [...document.querySelectorAll('#scoreBody tr')].find((row) => String(row.dataset.id || '') === id);
+    if (scoreboardRow && !scoreboardRow.classList.contains('selected')) scoreboardRow.click();
+  });
   return panel;
+}
+
+function renderPlayerSelect() {
+  const select = $('#v10LitePlayerSelect');
+  if (!select || !state.match) return;
+  const players = state.match.players || [];
+  const current = String(state.selectedPlayerId || players[0]?.steamid || players[0]?.name || '');
+  select.innerHTML = players.map((p) => {
+    const id = String(p.steamid || p.name);
+    return `<option value="${esc(id)}">${esc(p.name)}</option>`;
+  }).join('');
+  if (players.some((p) => String(p.steamid || p.name) === current)) select.value = current;
 }
 
 function renderEpisodePanel() {
   const panel = ensurePanel();
   if (!panel || !state.match) return;
+  renderPlayerSelect();
   const box = $('#v10LiteEpisodes');
   const eps = episodesForView();
   const selected = selectedPlayerName();
   const hint = $('#v10LiteHint');
   if (hint) hint.textContent = selected
     ? `${selected}: ${eps.length} фрагмент${eps.length === 1 ? '' : eps.length < 5 ? 'а' : 'ов'} смертей. WIDE*/REPEEK* отмечены отдельно, остальные доступны как DEATH REVIEW.`
-    : `Доступно ${eps.length} фрагментов. Выбери игрока в scoreboard, чтобы показать только его смерти.`;
+    : `Доступно ${eps.length} фрагментов. Выбери игрока в scoreboard или в списке справа.`;
   if (!eps.length) {
     box.innerHTML = '<div class="muted">Для выбранного игрока фрагменты смертей не найдены.</div>';
     return;
@@ -322,9 +366,13 @@ function syncControls() {
   if (label) label.textContent = `${state.time >= 0 ? '+' : '−'}${Math.abs(state.time).toFixed(1)}с`;
 }
 
-// Scoreboard is rebuilt by app.js on player selection, so refresh the episode list after the click.
+// Keep V10 Lite synced with the scoreboard. We store the clicked player ourselves,
+// instead of relying on timing/class changes inside app.js.
 document.addEventListener('click', (event) => {
-  if (event.target.closest('#scoreBody tr')) setTimeout(renderEpisodePanel, 0);
+  const row = event.target.closest('#scoreBody tr');
+  if (!row) return;
+  const id = String(row.dataset.id || '');
+  if (id) setTimeout(() => setSelectedPlayer(id), 0);
 });
 
 const observer = new MutationObserver(() => {
