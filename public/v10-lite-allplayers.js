@@ -3,7 +3,7 @@ const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (m) => ({ '&':'&amp;', '<
 
 const state = {
   match: null,
-  allMode: true,
+  allMode: false,
   rendering: false,
 };
 
@@ -16,8 +16,11 @@ window.fetch = async (...args) => {
     if (/\/api\/analyze(?:\?|$)/.test(url) && response.ok) {
       response.clone().json().then((data) => {
         state.match = data;
-        state.allMode = true;
-        setTimeout(() => activateAllPlayers(), 120);
+        state.allMode = false;
+        setTimeout(() => {
+          ensureAllOption();
+          syncSelectionStatus();
+        }, 120);
       }).catch(() => {});
     }
   } catch {}
@@ -36,8 +39,38 @@ function playerIdByName(name) {
   return player ? String(player.steamid || player.name) : '';
 }
 
+function playerNameById(id) {
+  const player = state.match?.players?.find((p) => String(p.steamid || p.name) === String(id));
+  return player?.name || '';
+}
+
 function episodeKey(ep) {
   return String(ep?.id || `${ep?.round || 0}-${ep?.tick || 0}-${ep?.player || ''}`);
+}
+
+function ensureSelectionStatus() {
+  const select = $('#v10LitePlayerSelect');
+  if (!select) return null;
+  let status = $('#v10LiteSelectionStatus');
+  if (!status) {
+    status = document.createElement('span');
+    status.id = 'v10LiteSelectionStatus';
+    status.className = 'v10-selection-status';
+    select.insertAdjacentElement('beforebegin', status);
+  }
+  return status;
+}
+
+function syncSelectionStatus() {
+  const select = $('#v10LitePlayerSelect');
+  const status = ensureSelectionStatus();
+  if (!select || !status) return;
+  if (state.allMode || select.value === '__all__') {
+    status.innerHTML = '<i></i>Показано: <b>все игроки</b>';
+    return;
+  }
+  const name = playerNameById(select.value) || select.options?.[select.selectedIndex]?.textContent || 'игрок';
+  status.innerHTML = `<i></i>Выбран: <b>${esc(name)}</b>`;
 }
 
 function ensureAllOption() {
@@ -51,6 +84,8 @@ function ensureAllOption() {
     select.insertBefore(option, select.firstChild);
   }
   if (state.allMode) select.value = '__all__';
+  ensureSelectionStatus();
+  syncSelectionStatus();
 }
 
 function groupedEpisodes() {
@@ -109,14 +144,6 @@ function renderAllPlayers() {
   }
 }
 
-function activateAllPlayers() {
-  ensureAllOption();
-  state.allMode = true;
-  const select = $('#v10LitePlayerSelect');
-  if (select) select.value = '__all__';
-  renderAllPlayers();
-}
-
 function openEpisodeThroughNativeLoader(ep, customButton) {
   const select = $('#v10LitePlayerSelect');
   const playerId = playerIdByName(ep.player);
@@ -135,22 +162,15 @@ function openEpisodeThroughNativeLoader(ep, customButton) {
     const index = playerEpisodes.findIndex((x) => episodeKey(x) === episodeKey(ep));
     const nativeButtons = [...document.querySelectorAll('#v10LiteEpisodes [data-replay-index]')];
     const nativeButton = index >= 0 ? nativeButtons[index] : null;
-
     if (nativeButton) nativeButton.click();
-
-    state.allMode = true;
-    ensureAllOption();
-    if (select) select.value = '__all__';
-    setTimeout(() => {
-      renderAllPlayers();
-      customButton.disabled = false;
-      customButton.textContent = oldText;
-    }, 40);
+    customButton.disabled = false;
+    customButton.textContent = oldText;
+    syncSelectionStatus();
   }));
 }
 
-// Intercept only the synthetic "Все игроки" value. Player values continue to use
-// the original V10 Lite handler and keep scoreboard ↔ replay synchronization.
+// "Все игроки" остаётся доступным вручную, но по умолчанию V10 Lite показывает
+// игрока, выбранного в scoreboard/селекторе.
 document.addEventListener('change', (event) => {
   const select = event.target.closest?.('#v10LitePlayerSelect');
   if (!select) return;
@@ -160,11 +180,18 @@ document.addEventListener('change', (event) => {
     renderAllPlayers();
   } else {
     state.allMode = false;
+    setTimeout(syncSelectionStatus, 0);
   }
 }, true);
 
 document.addEventListener('click', (event) => {
-  if (event.target.closest?.('#scoreBody tr')) state.allMode = false;
+  const row = event.target.closest?.('#scoreBody tr');
+  if (!row) return;
+  state.allMode = false;
+  setTimeout(() => {
+    ensureAllOption();
+    syncSelectionStatus();
+  }, 0);
 });
 
 const observer = new MutationObserver(() => {
