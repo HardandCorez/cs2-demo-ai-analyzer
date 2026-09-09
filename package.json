@@ -8,7 +8,7 @@
     "start": "node src/server-v10fast.js",
     "start:ollama-gateway": "node src/ollama-gateway-v62.js",
     "dev": "node --watch src/server-v10fast.js",
-    "check": "node --check src/server.js && node --check src/server-fastcore.js && node --check src/server-v10lite.js && node --check src/server-v10fast.js && node --check src/v5-metrics.js && node --check src/v6-positioning.js && node --check public/radar-catalog.js && node --check public/bootstrap-v72.js && node --check public/match-history.js && node --check public/matches-page.js && node --check public/v10-lite.js && node --check public/v10-lite-allplayers.js && node --check public/app.js"
+    "check": "node --check src/server.js && node --check src/server-fastcore.js && node --check src/server-v10lite.js && node --check src/server-v10fast.js && node --check src/v5-metrics.js && node --check src/v6-positioning.js && node --check public/radar-catalog.js && node --check public/bootstrap-v72.js && node --check public/fastcore-ui.js && node --check public/match-history.js && node --check public/matches-page.js && node --check public/v10-lite.js && node --check public/v10-lite-allplayers.js && node --check public/app.js"
   },
   "engines": {
     "node": ">=20"
