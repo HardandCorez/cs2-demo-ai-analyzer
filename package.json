@@ -1,14 +1,14 @@
 {
   "name": "hardandcore-cs2-demo-ai",
-  "version": "4.3.0",
+  "version": "4.3.1",
   "private": true,
   "type": "module",
-  "description": "CS2 demo analyzer V10 Lite with stable core analysis, episode coaching and a local matches history dashboard",
+  "description": "CS2 demo analyzer V10 Lite with stable core analysis, all-player episode coaching and a local matches history dashboard",
   "scripts": {
     "start": "node src/server-v10lite.js",
     "start:ollama-gateway": "node src/ollama-gateway-v62.js",
     "dev": "node --watch src/server-v10lite.js",
-    "check": "node --check src/server.js && node --check src/server-v10lite.js && node --check src/v5-metrics.js && node --check src/v6-positioning.js && node --check public/radar-catalog.js && node --check public/bootstrap-v72.js && node --check public/match-history.js && node --check public/matches-page.js && node --check public/v10-lite.js && node --check public/app.js"
+    "check": "node --check src/server.js && node --check src/server-v10lite.js && node --check src/v5-metrics.js && node --check src/v6-positioning.js && node --check public/radar-catalog.js && node --check public/bootstrap-v72.js && node --check public/match-history.js && node --check public/matches-page.js && node --check public/v10-lite.js && node --check public/v10-lite-allplayers.js && node --check public/app.js"
   },
   "engines": {
     "node": ">=20"
