@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#07090c" />
+  <title>HardandCore Demo AI — Матчи</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/matches.css" />
+</head>
+<body>
+  <div class="noise"></div>
+  <header class="topbar matches-topbar">
+    <a class="brand matches-brand" href="/">
+      <div class="brand-mark">HC</div>
+      <div>
+        <div class="brand-title">HardandCore Demo AI</div>
+        <div class="brand-sub">Match intelligence · local history</div>
+      </div>
+    </a>
+    <nav class="matches-nav">
+      <a class="ghost-btn" href="/">Анализ</a>
+      <a class="ghost-btn active" href="/matches.html">Матчи</a>
+    </nav>
+  </header>
+
+  <main class="shell matches-shell">
+    <section class="matches-hero">
+      <div>
+        <div class="eyebrow">MATCH HISTORY · LOCAL DASHBOARD</div>
+        <h1>Твои матчи и <span>повторяющиеся ошибки.</span></h1>
+        <p>История хранится только в этом браузере. После каждого анализа демки сюда автоматически добавляется компактный отчёт без полного replay.</p>
+      </div>
+      <div class="matches-profile">
+        <label for="primaryPlayer">Основной игрок</label>
+        <select id="primaryPlayer"><option value="">Авто: лучший игрок последнего матча</option></select>
+        <span class="muted">Выбери свой ник — карточки и тренды будут считаться по нему.</span>
+      </div>
+    </section>
+
+    <section class="match-kpis" id="matchKpis"></section>
+
+    <section class="panel matches-toolbar">
+      <div class="matches-filter-group">
+        <input id="matchSearch" type="search" placeholder="Поиск по карте или файлу…" />
+        <select id="mapFilter"><option value="all">Все карты</option></select>
+        <select id="sortMatches">
+          <option value="newest">Сначала новые</option>
+          <option value="rating">По индексу</option>
+          <option value="adr">По ADR</option>
+          <option value="kast">По KAST</option>
+        </select>
+      </div>
+      <div class="matches-actions">
+        <a class="primary" href="/">+ Новая демка</a>
+        <button id="clearHistory" class="ghost-btn" type="button">Очистить историю</button>
+      </div>
+    </section>
+
+    <section id="matchesEmpty" class="panel matches-empty hidden">
+      <div class="eyebrow">ИСТОРИЯ ПУСТА</div>
+      <h2>Сначала проанализируй демку.</h2>
+      <p>После первого анализа матч автоматически появится здесь.</p>
+      <a class="primary" href="/">Загрузить .dem</a>
+    </section>
+
+    <section class="matches-list" id="matchesList"></section>
+  </main>
+
+  <footer>HardandCore Demo AI · локальная история матчей · данные не отправляются в отдельное облачное хранилище</footer>
+  <script type="module" src="/matches-page.js"></script>
+</body>
+</html>
