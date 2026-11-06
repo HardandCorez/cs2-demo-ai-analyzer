@@ -11,9 +11,10 @@ const frames=[
 test('returns evidence with conservative verdict',()=>{
  const result=analyzeProfessionalEpisode(episode,{frames,sampleHz:4});
  assert.equal(result.mode,'professional');
- assert.equal(result.verdict.status,'insufficient-evidence');
+ assert.equal(result.verdict.status,'not-established');
  assert.ok(result.findings.some(f=>f.id==='repeek'));
- assert.ok(result.findings.every(f=>f.confidence==='hypothesis'));
+ assert.ok(result.findings.every(f=>f.isError===false && f.confidence==='observed-signal'));
+ assert.equal(result.verdict.label,'Подтверждённых ошибок: 0');
  assert.ok(result.evidence.some(e=>e.id==='duel_distance'&&e.value===80));
  assert.equal(result.comparison.alternative.simulationReady,false);
 });
