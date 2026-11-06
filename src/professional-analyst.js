@@ -24,7 +24,7 @@ export function analyzeProfessionalEpisode(episode,replay) {
   const team=arr(ref.players).filter(p=>victim && p.name!==victim.name && p.alive!==false && finite(p.teamNumber) && Number(p.teamNumber)===Number(victim.teamNumber));
   const teammateDistances=team.map(p=>dist(victim,p)).filter(finite);
   const nearest=teammateDistances.length?Math.min(...teammateDistances):null;
-  const moved=dist(before,victim), movedHalf=dist(midPlayer,victim);
+  const moved=dist(before,victim);
   const duration=before?Math.abs(Number(ref.t)-Number(early.t)):null;
   const speed=finite(moved)&&duration>0?moved/duration:null;
   const facing=angleDiff(victim?.yaw,victim,enemy);
@@ -40,34 +40,30 @@ export function analyzeProfessionalEpisode(episode,replay) {
   add('average_speed','Средняя скорость по прямой',speed,'u/s',ref.t);
   add('teammate_distance','Ближайший живой союзник (2D)',nearest,'u',ref.t);
   add('facing','Угол между yaw и направлением на противника (2D)',facing,'°',ref.t);
+  // Report exact telemetry observations. Do not turn heuristics into error verdicts.
   const findings=[];
-  const mark=(id,kind,level,headline,observation,interpretation,action,reason)=>{
-    findings.push({id,kind,level,headline,observation,interpretation,action,
-      confidence:'hypothesis',evidenceIds:reason,anchor:{round:episode.round,tick:episode.tick,t:0}});
+  const signal=(id,kind,headline,observation,action,evidenceIds=[])=>{
+    findings.push({id,kind,level:'observation',headline,observation,
+      interpretation:'Сигнал для покадровой проверки; не классифицирован как ошибка.',
+      action,confidence:'observed-signal',isError:false,evidenceIds,
+      anchor:{round:episode.round,tick:episode.tick,t:0}});
   };
   const reasons=arr(episode.reasons);
-  if(reasons.includes('REPEEK*'))mark('repeek','decision','review','Возможный повторный выход',
-    'Исходный анализ пометил эпизод как REPEEK*.',
-    'Повторный выход может быть читаемым, но без информации о предыдущем контакте и видимости это не доказанная ошибка.',
-    'Проверь контакт до выхода: можно ли сбросить тайминг, поменять угол или сыграть от флешки?',[]);
-  if(reasons.includes('WIDE*'))mark('wide','movement','review','Возможный широкий пик',
-    'Исходный анализ пометил эпизод как WIDE*.',
-    'Ширина пика сама по себе не означает ошибку: учитывай дистанцию, прицел, информацию и наличие размена.',
-    'Сравни широкий выход с коротким открытием одного угла; выбери вариант по позиции противника.',[]);
-  if(reasons.includes('FLASH'))mark('flash','information','review','Контакт на фоне ослепления',
-    'Первичный анализ отмечает эффект флешки в момент смерти.',
-    'Нужно проверить точное время и степень ослепления перед выводом о неверном действии.',
-    'Сверь момент ослепления с решением об открытии угла и возможностью переждать за укрытием.',[]);
-  if(nearest!==null && nearest>900)mark('trade','teamplay','review','Дистанция до размена',
-    'Ближайший живой тиммейт находился на расстоянии '+round(nearest)+'u по прямой.',
-    'Расстояние не подтверждает невозможность размена: стены, этаж и LOS здесь не учитываются.',
-    'Проверь маршрут тиммейта и реальную линию огня до того, как делать вывод об изоляции.',
-    ['teammate_distance']);
-  if(facing!==null && facing>60)mark('facing','mechanics','review','Угол прицела требует проверки',
-    'Разница между yaw и направлением на известную из демки позицию врага: '+round(facing)+'°.',
-    'Это расчёт по горизонтали с полной информацией из демки, а не доказательство ошибки crosshair placement.',
-    'Посмотри POV непосредственно до контакта и сравни положение прицела только с реально ожидаемым углом.',
-    ['facing']);
+  if(reasons.includes('REPEEK*'))signal('repeek','decision','Метка REPEEK',
+    'Исходный детектор обозначил этот эпизод REPEEK*. Повторный контакт не подтверждён покадровым событием.',
+    'Проверить два контакта и линии видимости до вынесения вердикта.');
+  if(reasons.includes('WIDE*'))signal('wide','movement','Метка WIDE',
+    'Исходный детектор обозначил широкий пик по эвристике WIDE*.',
+    'Проверить геометрию угла, скорость и открытые линии огня.');
+  if(reasons.includes('FLASH'))signal('flash','information','Флешка в момент смерти',
+    'В исходных событиях отмечен эффект ослепления на момент смерти.',
+    'Установить точную длительность и момент решения о контакте.');
+  if(nearest!==null && nearest>900)signal('trade','teamplay','Дистанция до ближайшего союзника',
+    'Ближайший живой союзник находился в '+round(nearest)+'u по прямой.',
+    'Проверить LOS, укрытия и реальное окно размена.',['teammate_distance']);
+  if(facing!==null && facing>60)signal('facing','mechanics','Отклонение yaw от направления на врага',
+    'Горизонтальное отклонение '+round(facing)+'° относительно позиции соперника, известной из полной демки.',
+    'Сравнить с видимыми игроку углами в POV.',['facing']);
   const evidenceLimits=[
     'Данные replay дискретные: частота выборки '+(finite(replay.sampleHz)?replay.sampleHz:'неизвестна')+' Гц; не измеряется точный момент контрстрейфа/первой пули.',
     'Нет доказанного line-of-sight, навигационной геометрии, звуков и информации игрока; позиции врагов в демке могут быть скрыты от игрока.',
@@ -75,14 +71,14 @@ export function analyzeProfessionalEpisode(episode,replay) {
     'Любые альтернативные траектории будут обучающей симуляцией, а не записью реально возможного исхода.'
   ];
   return {
-    version:'professional-analyst-v1',mode:'professional',episode:{id:episode.id,round:episode.round,tick:episode.tick,player:episode.player,attacker:episode.attacker},
-    verdict:{status:'insufficient-evidence',label:'Ошибка не доказана',summary:findings.length
-      ? 'Есть '+findings.length+' сигнал(ов) для проверки, но недостаточно данных для подтверждённого тактического вывода.'
-      : 'Смерть сама по себе не является ошибкой; подтверждённых сигналов недостаточно.'},
+    version:'professional-analyst-v1.1',mode:'professional',episode:{id:episode.id,round:episode.round,tick:episode.tick,player:episode.player,attacker:episode.attacker},
+    verdict:{status:'not-established',label:'Подтверждённых ошибок: 0',summary:findings.length
+      ? 'Зафиксировано сигналов для проверки: '+findings.length+'. Текущих данных недостаточно для точной классификации ошибки.'
+      : 'Ошибка в эпизоде не установлена. Исход смерти не служит доказательством ошибки.'},
     evidence,findings,limits:evidenceLimits,
     comparison:{actual:{label:'Фактическая траектория',source:'demo',frames:frames.map(f=>({tick:f.tick,t:f.t,player:get(f)?{x:get(f).x,y:get(f).y,z:get(f).z,yaw:get(f).yaw}:null})).filter(f=>f.player)},
       alternative:{label:'Рекомендация аналитика',source:'hypothesis',frames:[],simulationReady:false}},
-    training:{objective:findings.length?'Проверить отмеченные гипотезы в POV, затем отработать только подтверждённую проблему':'Найти решение до контакта и оценить качество без привязки к результату',
+    training:{objective:findings.length?'Проверить сигналы на исходных тиках и определить точную причину':'Оценить решение на момент контакта независимо от исхода',
       exercise:'Просмотри момент за 2с до смерти; запиши доступную информацию, варианты действий и критерий выбора. Сравни 3 повторения аналогичного эпизода.',
       successMetric:'3 эпизода с аргументированным решением; не считать любую смерть ошибкой'},
     missingData:['LOS/геометрия','POV visibility','audio/information','shot and damage events','tick/subtick movement']};
