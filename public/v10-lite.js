@@ -267,7 +267,7 @@ function renderViewer() {
     </div>
     <div class="v10-pro-actions">
       <button id="v10ProAnalyze" class="ghost-btn" type="button">Профессиональный аналитик · разбор с доказательствами</button>
-      <span class="muted">Разбор отдельно отмечает факты, гипотезы и неизвестные данные.</span>
+      <span class="muted">Только подтверждённые факты. Непроверенные сигналы не считаются ошибками.</span>
     </div>
     <div id="v10ProOutput" class="v10-pro-output" aria-live="polite" hidden></div>
     <div id="v10LiteCoach" class="v10-lite-coach"><div class="muted">Готовим coach-разбор выбранного эпизода…</div></div>
@@ -460,15 +460,15 @@ async function loadProfessionalCoach() {
     const facts = (data.evidence || []).map(e =>
       '<div class="v10-pro-fact"><span>'+esc(e.label)+'</span><b>'+esc(e.value)+' '+esc(e.unit)+'</b><small>t='+esc(e.t)+'с</small></div>').join('');
     const findings = (data.findings || []).map(f =>
-      '<article class="v10-pro-finding"><h5>'+esc(f.headline)+' <span class="v10-pro-hypothesis">ГИПОТЕЗА</span></h5>'+
+      '<article class="v10-pro-finding"><h5>'+esc(f.headline)+' <span class="v10-pro-hypothesis">НЕ ОШИБКА</span></h5>'+
       '<p><b>Что известно:</b> '+esc(f.observation)+'</p>'+
-      '<p><b>Что это может означать:</b> '+esc(f.interpretation)+'</p>'+
-      '<p><b>Как проверить и исправить:</b> '+esc(f.action)+'</p>'+
+      '<p><b>Статус:</b> '+esc(f.interpretation)+'</p>'+
+      '<p><b>Что необходимо проверить:</b> '+esc(f.action)+'</p>'+
       '<button class="ghost-btn" data-pro-tick="'+esc(f.anchor?.t ?? 0)+'" type="button">Показать момент на replay</button></article>').join('');
     box.innerHTML = '<div class="v10-pro-head"><div class="eyebrow">PROFESSIONAL ANALYST · EVIDENCE FIRST</div>'+
       '<h4>'+esc(data.verdict?.label || 'Разбор')+'</h4><p>'+esc(data.verdict?.summary || '')+'</p></div>'+
       '<h5>Факты из демки</h5><div class="v10-pro-facts">'+(facts || '<p class="muted">Недостаточно телеметрии.</p>')+'</div>'+
-      '<h5>Проверяемые гипотезы</h5>'+(findings || '<p>По имеющимся данным ошибка не установлена.</p>')+
+      '<h5>Сигналы для проверки (не ошибки)</h5>'+(findings || '<p>По имеющимся данным ошибка не установлена.</p>')+
       '<h5>Упражнение</h5><p>'+esc(data.training?.exercise || '')+'</p>'+
       '<p><b>Критерий:</b> '+esc(data.training?.successMetric || '')+'</p>'+
       '<details><summary>Ограничения доказательств</summary><ul>'+(data.limits || []).map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul></details>';
