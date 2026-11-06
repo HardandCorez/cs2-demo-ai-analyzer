@@ -7,6 +7,7 @@ import fs from 'node:fs/promises';
 import { openAsBlob } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parseTicks } from '@laihoe/demoparser2';
+import { analyzeProfessionalEpisode } from './professional-analyst.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -334,6 +335,21 @@ app.post('/api/episode-replay', upload.single('demo'), async (req, res) => {
     res.status(422).json({ error: error?.message || 'Не удалось построить replay эпизода' });
   } finally {
     await fs.unlink(req.file.path).catch(() => {});
+  }
+});
+
+app.post('/api/professional-coach', (req, res) => {
+  const episode = req.body?.episode;
+  const replay = req.body?.replay;
+  if (!episode?.player || !Array.isArray(replay?.frames) || replay.frames.length < 2) {
+    return res.status(400).json({ error: 'Нужен эпизод и минимум два кадра replay.' });
+  }
+  // Bounded request; avoid large client-supplied replay payloads.
+  if (replay.frames.length > 1024) return res.status(413).json({ error: 'Слишком много кадров.' });
+  try {
+    return res.json(analyzeProfessionalEpisode(episode, replay));
+  } catch (error) {
+    return res.status(422).json({ error: error?.message || 'Ошибка профессионального анализа' });
   }
 });
 
