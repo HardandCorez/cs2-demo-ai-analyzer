@@ -265,8 +265,14 @@ function renderViewer() {
       <input id="v10LiteRange" type="range" min="-${Number(r.beforeSec || 4)}" max="${Number(r.afterSec || 4)}" step="0.05" value="-${Number(r.beforeSec || 4)}" />
       <span id="v10LiteTime">−${Number(r.beforeSec || 4).toFixed(1)}с</span>
     </div>
+    <div class="v10-pro-actions">
+      <button id="v10ProAnalyze" class="ghost-btn" type="button">Профессиональный аналитик · разбор с доказательствами</button>
+      <span class="muted">Разбор отдельно отмечает факты, гипотезы и неизвестные данные.</span>
+    </div>
+    <div id="v10ProOutput" class="v10-pro-output" aria-live="polite" hidden></div>
     <div id="v10LiteCoach" class="v10-lite-coach"><div class="muted">Готовим coach-разбор выбранного эпизода…</div></div>
     <div class="position-disclaimer">V10 Lite показывает только координаты короткого окна. WIDE*/REPEEK* — эвристики; navmesh и line-of-sight не используются.</div>`;
+  $('#v10ProAnalyze')?.addEventListener('click', loadProfessionalCoach);
   $('#v10LitePlay')?.addEventListener('click', togglePlay);
   $('#v10LiteError')?.addEventListener('click', () => { state.playing = false; stopAnimation(); state.time = 0; syncControls(); drawFrame(); });
   $('#v10LiteRange')?.addEventListener('input', (e) => { state.playing = false; stopAnimation(); state.time = Number(e.target.value); syncControls(); drawFrame(); });
@@ -435,3 +441,42 @@ const observer = new MutationObserver(() => {
 observer.observe(document.documentElement, { childList: true, subtree: true });
 
 window.addEventListener('resize', () => { if (state.replay) drawFrame(); });
+
+async function loadProfessionalCoach() {
+  const box = document.querySelector('#v10ProOutput');
+  const btn = document.querySelector('#v10ProAnalyze');
+  if (!box || !state.episode || !state.replay) return;
+  box.hidden = false;
+  box.textContent = 'Анализируем доказательства эпизода…';
+  btn.disabled = true;
+  try {
+    const response = await originalFetch('/api/professional-coach', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({episode:state.episode,replay:state.replay}),
+    });
+    const data = await response.json();
+    if(!response.ok) throw new Error(data.error || 'HTTP '+response.status);
+    const facts = (data.evidence || []).map(e =>
+      '<div class="v10-pro-fact"><span>'+esc(e.label)+'</span><b>'+esc(e.value)+' '+esc(e.unit)+'</b><small>t='+esc(e.t)+'с</small></div>').join('');
+    const findings = (data.findings || []).map(f =>
+      '<article class="v10-pro-finding"><h5>'+esc(f.headline)+' <span class="v10-pro-hypothesis">ГИПОТЕЗА</span></h5>'+
+      '<p><b>Что известно:</b> '+esc(f.observation)+'</p>'+
+      '<p><b>Что это может означать:</b> '+esc(f.interpretation)+'</p>'+
+      '<p><b>Как проверить и исправить:</b> '+esc(f.action)+'</p>'+
+      '<button class="ghost-btn" data-pro-tick="'+esc(f.anchor?.t ?? 0)+'" type="button">Показать момент на replay</button></article>').join('');
+    box.innerHTML = '<div class="v10-pro-head"><div class="eyebrow">PROFESSIONAL ANALYST · EVIDENCE FIRST</div>'+
+      '<h4>'+esc(data.verdict?.label || 'Разбор')+'</h4><p>'+esc(data.verdict?.summary || '')+'</p></div>'+
+      '<h5>Факты из демки</h5><div class="v10-pro-facts">'+(facts || '<p class="muted">Недостаточно телеметрии.</p>')+'</div>'+
+      '<h5>Проверяемые гипотезы</h5>'+(findings || '<p>По имеющимся данным ошибка не установлена.</p>')+
+      '<h5>Упражнение</h5><p>'+esc(data.training?.exercise || '')+'</p>'+
+      '<p><b>Критерий:</b> '+esc(data.training?.successMetric || '')+'</p>'+
+      '<details><summary>Ограничения доказательств</summary><ul>'+(data.limits || []).map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul></details>';
+    box.querySelectorAll('[data-pro-tick]').forEach(button=>button.addEventListener('click',()=>{
+      state.playing=false;stopAnimation();state.time=Number(button.dataset.proTick);
+      syncControls();drawFrame();
+      document.querySelector('#v10LiteCanvas')?.scrollIntoView({behavior:'smooth',block:'center'});
+    }));
+  } catch(err) {box.textContent = 'Не удалось выполнить разбор: '+(err.message || String(err));}
+  finally {btn.disabled=false;}
+}
