@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import { requireLoopbackHost } from './local-security.js';
 import multer from 'multer';
 import path from 'node:path';
 import os from 'node:os';
@@ -27,6 +28,7 @@ const liteBase = `http://127.0.0.1:${litePort}`;
 const fastBase = `http://127.0.0.1:${fastPort}`;
 const app = express();
 app.disable('x-powered-by');
+app.use(requireLoopbackHost);
 
 const upload = multer({
   dest: os.tmpdir(),
@@ -168,7 +170,11 @@ app.post('/api/analyze', upload.single('demo'), async (req, res) => {
 });
 
 function proxyToLite(req, res) {
+  // The public middleware has already validated the browser Origin. An internal
+  // forwarded request uses a different port, so strip Origin before proxying
+  // to the loopback-only service (which has its own Host validation).
   const headers = { ...req.headers, host: `127.0.0.1:${litePort}` };
+  delete headers.origin;
   const upstream = http.request({
     hostname: '127.0.0.1',
     port: litePort,

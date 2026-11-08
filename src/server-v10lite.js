@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import { requireLoopbackHost } from './local-security.js';
 import multer from 'multer';
 import path from 'node:path';
 import os from 'node:os';
@@ -28,6 +29,7 @@ else process.env.PORT = previousPort;
 const internalBase = `http://127.0.0.1:${internalPort}`;
 const app = express();
 app.disable('x-powered-by');
+app.use(requireLoopbackHost);
 app.use(express.json({ limit: '4mb' }));
 app.use(express.static(publicDir));
 
