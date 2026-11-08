@@ -170,7 +170,11 @@ app.post('/api/analyze', upload.single('demo'), async (req, res) => {
 });
 
 function proxyToLite(req, res) {
+  // The public middleware has already validated the browser Origin. An internal
+  // forwarded request uses a different port, so strip Origin before proxying
+  // to the loopback-only service (which has its own Host validation).
   const headers = { ...req.headers, host: `127.0.0.1:${litePort}` };
+  delete headers.origin;
   const upstream = http.request({
     hostname: '127.0.0.1',
     port: litePort,
