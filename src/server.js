@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import { requireLoopbackHost } from './local-security.js';
 import multer from 'multer';
 import path from 'node:path';
 import os from 'node:os';
@@ -39,6 +40,7 @@ const aiTimeoutMs = Math.max(10_000, Number(process.env.AI_TIMEOUT_MS || 600_000
 
 const app = express();
 app.disable('x-powered-by');
+app.use(requireLoopbackHost);
 app.use(express.json({ limit: '3mb' }));
 app.use(express.static(publicDir));
 
