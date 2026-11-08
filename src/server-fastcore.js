@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import { requireLoopbackHost } from './local-security.js';
 import multer from 'multer';
 import path from 'node:path';
 import os from 'node:os';
@@ -16,6 +17,7 @@ const maxDemoMb = Math.max(50, Number(process.env.MAX_DEMO_MB || 800));
 
 const app = express();
 app.disable('x-powered-by');
+app.use(requireLoopbackHost);
 app.use(express.json({ limit: '2mb' }));
 
 const upload = multer({
