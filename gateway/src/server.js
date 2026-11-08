@@ -1,14 +1,16 @@
 import 'dotenv/config';
 import express from 'express';
+import { timingSafeEqual } from 'node:crypto';
 
 const app = express();
 const port = Number(process.env.PORT || 8080);
 const model = process.env.OPENAI_MODEL || 'gpt-5.4-mini';
 const gatewayToken = String(process.env.AI_GATEWAY_TOKEN || '').trim();
-const limitPerMinute = Math.max(1, Number(process.env.RATE_LIMIT_PER_MINUTE || 30));
+const limitPerMinute = Math.max(1, Math.min(120, Number(process.env.RATE_LIMIT_PER_MINUTE) || 30));
 
 app.disable('x-powered-by');
-app.set('trust proxy', 1);
+// Trust forwarded IPs only when deployment is known to use a trusted reverse proxy.
+app.set('trust proxy', process.env.TRUST_PROXY === '1' ? 1 : false);
 app.use(express.json({ limit: '512kb' }));
 
 const buckets = new Map();
@@ -39,7 +41,10 @@ function authorize(req, res, next) {
     return res.status(503).json({ error: 'AI_GATEWAY_TOKEN не настроен на gateway' });
   }
   const auth = String(req.headers.authorization || '');
-  if (auth !== `Bearer ${gatewayToken}`) {
+  const provided = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  const candidate = Buffer.from(provided);
+  const expected = Buffer.from(gatewayToken);
+  if (!provided || candidate.length !== expected.length || !timingSafeEqual(candidate, expected)) {
     return res.status(401).json({ error: 'Неверный AI gateway token' });
   }
   next();
@@ -78,7 +83,7 @@ app.get('/health', (_req, res) => {
   });
 });
 
-app.post('/v1/analyze', rateLimit, authorize, async (req, res) => {
+app.post('/v1/analyze', authorize, rateLimit, async (req, res) => {
   if (!process.env.OPENAI_API_KEY) {
     return res.status(503).json({ error: 'OPENAI_API_KEY не настроен на gateway' });
   }
@@ -113,9 +118,15 @@ app.post('/v1/analyze', rateLimit, authorize, async (req, res) => {
 
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      return res.status(response.status).json({
-        error: data?.error?.message || `OpenAI API HTTP ${response.status}`,
-      });
+      // Never forward upstream diagnostics: they can contain account/config details.
+      console.error('[OpenAI upstream]', response.status, String(data?.error?.code || 'request_failed').slice(0, 80));
+      const status = response.status === 429 ? 429 : [401, 403].includes(response.status) ? 503 : 502;
+      const message = response.status === 429
+        ? 'Достигнут лимит запросов к OpenAI API'
+        : [401, 403].includes(response.status)
+          ? 'OpenAI API недоступен: проверь серверные настройки доступа'
+          : 'Не удалось выполнить запрос к OpenAI API';
+      return res.status(status).json({ error: message });
     }
 
     const analysis = extractOutputText(data);
@@ -123,15 +134,16 @@ app.post('/v1/analyze', rateLimit, authorize, async (req, res) => {
 
     res.json({ analysis, model, provider: 'openai-gateway' });
   } catch (error) {
-    console.error(error);
+    console.error('[OpenAI request failed]', error?.name || 'unknown');
     const timeout = error?.name === 'TimeoutError' || error?.name === 'AbortError';
-    res.status(502).json({ error: timeout ? 'OpenAI API не ответил за 90 секунд' : `Ошибка OpenAI API: ${error?.message || error}` });
+    res.status(502).json({ error: timeout ? 'OpenAI API не ответил за 90 секунд' : 'Ошибка соединения с OpenAI API' });
   }
 });
 
 app.use((error, _req, res, _next) => {
-  console.error(error);
-  res.status(400).json({ error: error?.message || 'Ошибка gateway' });
+  console.error('[AI gateway invalid request]', error?.type || error?.name || 'unknown');
+  if (error?.type === 'entity.too.large') return res.status(413).json({ error: 'Слишком большой запрос' });
+  res.status(400).json({ error: 'Некорректный запрос к gateway' });
 });
 
 app.listen(port, () => {
