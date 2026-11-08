@@ -1,26 +1,29 @@
-// Reject DNS rebinding and cross-site requests to the localhost-only analyzer.
-const allowed = new Set(['localhost', '127.0.0.1', '[::1]']);
+// The analyzer is intended for localhost only. Disallow DNS rebinding and
+// browser cross-origin requests, including requests from other local ports.
+const HOST_PATTERN = /^(localhost|127\.0\.0\.1|\[::1\])(?::([1-9][0-9]{0,4}))?$/i;
 
 export function requireLoopbackHost(req, res, next) {
   const hostHeader = String(req.headers.host || '').toLowerCase();
-  const hostname = hostHeader.startsWith('[')
-    ? hostHeader.slice(0, hostHeader.indexOf(']') + 1)
-    : hostHeader.split(':')[0];
-  if (!allowed.has(hostname)) {
+  const matched = HOST_PATTERN.exec(hostHeader);
+  if (!matched || (matched[2] && Number(matched[2]) > 65535)) {
     return res.status(403).json({ error: 'Недопустимый Host для локального API' });
   }
 
   const origin = String(req.headers.origin || '');
   if (origin) {
-    let originHost;
+    let parsed;
     try {
-      originHost = new URL(origin).hostname.toLowerCase();
+      parsed = new URL(origin);
     } catch {
       return res.status(403).json({ error: 'Недопустимый Origin' });
     }
-    if (!allowed.has(originHost)) {
-      return res.status(403).json({ error: 'Запросы с внешних сайтов запрещены' });
+    const expectedOrigin = new URL(`http://${hostHeader}`).origin;
+    if (parsed.protocol !== 'http:' || parsed.origin !== expectedOrigin ||
+        parsed.username || parsed.password || parsed.pathname !== '/' ||
+        parsed.search || parsed.hash) {
+      return res.status(403).json({ error: 'Межсайтовые запросы к локальному API запрещены' });
     }
   }
+
   next();
 }
