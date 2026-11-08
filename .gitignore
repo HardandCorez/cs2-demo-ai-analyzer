@@ -1,6 +1,13 @@
+# Never commit local configuration or API credentials
 .env
+.env.*
+!.env.example
+!**/.env.example
+*.pem
+*.p12
+*.pfx
+
 node_modules/
 uploads/*
 !uploads/.gitkeep
-gateway/.env
 gateway/node_modules/
