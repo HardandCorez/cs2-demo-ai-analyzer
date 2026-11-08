@@ -22,6 +22,19 @@ const port = Number(process.env.PORT || 3000);
 const maxDemoMb = Math.max(50, Number(process.env.MAX_DEMO_MB || 800));
 const aiGatewayUrl = String(process.env.AI_GATEWAY_URL || '').trim().replace(/\/+$/, '');
 const aiGatewayToken = String(process.env.AI_GATEWAY_TOKEN || '').trim();
+const aiRequests = new Map();
+function aiRateLimit(req, res, next) {
+  const key = req.socket.remoteAddress || 'local';
+  const now = Date.now();
+  const prior = aiRequests.get(key);
+  if (!prior || now - prior.startedAt >= 60_000) {
+    aiRequests.set(key, { startedAt: now, count: 1 });
+    return next();
+  }
+  prior.count += 1;
+  if (prior.count > 10) return res.status(429).json({ error: 'Слишком много AI-запросов. Повтори через минуту.' });
+  next();
+}
 const aiTimeoutMs = Math.max(10_000, Number(process.env.AI_TIMEOUT_MS || 600_000));
 
 const app = express();
@@ -634,9 +647,13 @@ async function callOpenAIDirect(payload) {
 
   const data = await apiResponse.json().catch(() => ({}));
   if (!apiResponse.ok) {
-    const message = data?.error?.message || `OpenAI API HTTP ${apiResponse.status}`;
-    const error = new Error(message);
-    error.status = apiResponse.status;
+    const status = apiResponse.status === 429 ? 429 : [401, 403].includes(apiResponse.status) ? 503 : 502;
+    const error = new Error(apiResponse.status === 429
+      ? 'Превышен лимит OpenAI API'
+      : [401, 403].includes(apiResponse.status)
+        ? 'Ошибка серверной настройки доступа к OpenAI API'
+        : 'OpenAI API временно недоступен');
+    error.status = status;
     throw error;
   }
 
@@ -651,6 +668,26 @@ async function callOpenAIDirect(payload) {
 }
 
 async function callAIGateway(payload) {
+  // Credentials must never traverse a plaintext non-local connection.
+  let endpoint;
+  try {
+    endpoint = new URL(aiGatewayUrl);
+  } catch {
+    const error = new Error('Некорректный AI_GATEWAY_URL');
+    error.status = 503;
+    throw error;
+  }
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(endpoint.hostname);
+  if (endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && loopback)) {
+    const error = new Error('Удалённый AI gateway должен использовать HTTPS');
+    error.status = 503;
+    throw error;
+  }
+  if (!loopback && !aiGatewayToken) {
+    const error = new Error('Для удалённого AI gateway нужен AI_GATEWAY_TOKEN');
+    error.status = 503;
+    throw error;
+  }
   const headers = { 'Content-Type': 'application/json' };
   if (aiGatewayToken) headers.Authorization = `Bearer ${aiGatewayToken}`;
 
@@ -663,8 +700,10 @@ async function callAIGateway(payload) {
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(data?.error || `AI Gateway HTTP ${response.status}`);
-    error.status = response.status;
+    const error = new Error(response.status === 429
+      ? 'Лимит запросов AI gateway'
+      : 'AI gateway не смог обработать запрос');
+    error.status = response.status === 429 ? 429 : 502;
     throw error;
   }
   if (!data?.analysis) {
@@ -675,7 +714,7 @@ async function callAIGateway(payload) {
   return data;
 }
 
-app.post('/api/ai', async (req, res) => {
+app.post('/api/ai', aiRateLimit, async (req, res) => {
   const match = req.body?.match;
   if (!match?.players?.length) return res.status(400).json({ error: 'Нет данных матча для AI-анализа' });
 
@@ -717,7 +756,8 @@ app.use((error, _req, res, _next) => {
   res.status(400).json({ error: error?.message || 'Ошибка запроса' });
 });
 
-app.listen(port, () => {
+// This service is an internal backend: do not expose an unauthenticated AI endpoint to the LAN.
+app.listen(port, '127.0.0.1', () => {
   console.log(`CS2 Demo AI Analyzer: http://localhost:${port}`);
   console.log('Advanced metrics: v6-positioning-context');
   console.log(`AI mode: ${aiGatewayUrl ? `gateway -> ${aiGatewayUrl}` : process.env.OPENAI_API_KEY ? 'direct OpenAI' : 'not configured'}`);
