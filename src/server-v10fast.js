@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import { requireLoopbackHost } from './local-security.js';
 import multer from 'multer';
 import path from 'node:path';
 import os from 'node:os';
@@ -27,6 +28,7 @@ const liteBase = `http://127.0.0.1:${litePort}`;
 const fastBase = `http://127.0.0.1:${fastPort}`;
 const app = express();
 app.disable('x-powered-by');
+app.use(requireLoopbackHost);
 
 const upload = multer({
   dest: os.tmpdir(),
