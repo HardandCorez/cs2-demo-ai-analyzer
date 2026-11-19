@@ -13,6 +13,7 @@ await import('./fastcore-ui.js');
 await import('./app.js');
 await import('./v10-lite.js');
 await import('./v10-lite-allplayers.js');
+await import('./replay-3d.js');
 
 const brandSub=document.querySelector('.brand-sub');
 if(brandSub)brandSub.textContent='CS2 demo intelligence · V10 Lite 4.4 Fast Core';
