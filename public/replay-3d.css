@@ -8,3 +8,10 @@
 .replay-3d-status{position:absolute;bottom:10px;left:12px;right:12px;background:rgba(4,8,15,.75);color:#cad5e6;font-size:12px;line-height:1.4;padding:7px 9px;border-radius:6px;pointer-events:none}
 .replay-3d-stage .replay-3d-legend{background:rgba(4,8,15,.72);color:#e4edfa;padding:6px 8px;border-radius:6px;font-size:12px}
 .replay-3d-error{padding:35px 20px;text-align:center;color:#ffb3b3}
+
+/* The 3D switch adds one button before the four existing episode controls. */
+#v10LiteViewer .v10-lite-controls{grid-template-columns:auto auto auto minmax(120px,1fr) auto}
+@media(max-width:900px){
+  #v10LiteViewer .v10-lite-controls{grid-template-columns:repeat(3,minmax(0,auto))}
+  #v10LiteViewer .v10-lite-controls input[type=range]{grid-column:1/-1}
+}
