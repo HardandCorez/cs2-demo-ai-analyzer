@@ -66,7 +66,7 @@ function setupReplay(detail) {
     stage, wrap, switcher, detail, active: false, follow: false, time: -Number(detail.replay.beforeSec || 4),
     map: safeMap(detail.map), selected: String(detail.episode?.player || ''), actors: new Map(),
     renderer: null, scene: null, camera: null, controls: null, grid: null, trace: null,
-    mapStatus: 'Без 3D-геометрии карты · сетка', resizeObserver: null, T: null,
+    mapStatus: 'Без 3D-геометрии карты · сетка', resizeObserver: null, T: null, lastTrailKey: null,
   };
   current = s;
 
@@ -226,13 +226,16 @@ function centerCamera(s, resetDistance = false) {
 }
 
 function updateTrail(s) {
+  const frames = s.detail.replay.frames.filter(f => Number(f.t) <= s.time);
+  const trailKey = s.selected + ':' + frames.length;
+  if (s.lastTrailKey === trailKey) return;
+  s.lastTrailKey = trailKey;
   if (s.trace) {
     s.scene.remove(s.trace);
     s.trace.geometry.dispose();
     s.trace.material.dispose();
     s.trace = null;
   }
-  const frames = s.detail.replay.frames.filter(f => Number(f.t) <= s.time);
   const points = frames.map(f => (f.players || []).find(p => p.name === s.selected))
     .filter(Boolean).map(p => sourceToThree(p));
   if (points.length < 2) return;
