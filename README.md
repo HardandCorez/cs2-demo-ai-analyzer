@@ -128,3 +128,28 @@ https://ТВОЙ-ДОМЕН/health
 **Где хранить ключ:** в секретах хостинга удалённого gateway или в локальном `.env` при прямом режиме. На компьютере пользователя `.env` не отправляется в Git. Текущий проект с `dotenv/config` автоматически читает `.env`, а `.env.local` требует отдельной настройки загрузки.
 
 Если ранее ключ был случайно опубликован, исключение файла из Git не удаляет его из истории: отзови ключ на OpenAI Platform и создай новый, затем проверь использование API и историю коммитов.
+
+## Experimental 3D episode replay (S2V glTF export)
+
+This branch adds an optional **2D/3D** toggle to the existing 8-second V10 Lite
+replay. It uses existing /api/episode-replay data, not a second .dem parser.
+The full match replay and accurate skeletal animation are **not** implemented.
+
+- Native S2V uses .NET/OpenGL and is not embedded in the browser.
+- Browser rendering uses pinned Three.js modules fetched from jsDelivr (internet
+  connection and working WebGL required to switch to 3D).
+- Without exported map geometry, a fallback grid displays the T/CT players as
+  simplified shapes with facing/yaw and the selected player's movement trail.
+- To load geometry, export the CS2 map with Source 2 Viewer to glTF/GLB and
+  install it at public/assets/maps/de_mirage/scene.glb (or scene.gltf with its
+  dependencies). See public/assets/maps/README.md for details.
+- The glTF map may need manual rotation/scale/position calibration (optional
+  transform.json) to align with demoparser world coordinates. Confirm landmarks
+  before analyzing line of sight. This viewer makes no LOS/collision claims.
+- Map assets are intentionally excluded from Git. Check Valve content rights
+  before redistributing exports. The MIT license of S2V does not license Valve
+  game data.
+
+Validation: npm test; npm run check; then load a .dem, select a death episode,
+press "◈ 3D", and check both camera tracking and 2D/3D switching.
+
