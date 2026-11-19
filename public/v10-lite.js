@@ -185,6 +185,9 @@ async function loadEpisodeReplay(ep, button) {
     state.time = -Number(data.beforeSec || 4);
     renderViewer();
     drawFrame();
+    document.dispatchEvent(new CustomEvent('cs2:episode-replay-loaded', {
+      detail: { episode: ep, replay: data, map: state.match?.map || '' },
+    }));
     loadEpisodeCoach();
     $('#v10LitePanel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (error) {
@@ -418,6 +421,7 @@ function syncControls() {
   if (play) play.textContent = state.playing ? '❚❚' : '▶';
   const label = $('#v10LiteTime');
   if (label) label.textContent = `${state.time >= 0 ? '+' : '−'}${Math.abs(state.time).toFixed(1)}с`;
+  document.dispatchEvent(new CustomEvent('cs2:episode-replay-time', { detail: { time: state.time } }));
 }
 
 // Keep V10 Lite synced with the scoreboard. We store the clicked player ourselves,
