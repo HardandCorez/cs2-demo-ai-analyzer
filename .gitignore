@@ -11,3 +11,6 @@ node_modules/
 uploads/*
 !uploads/.gitkeep
 gateway/node_modules/
+
+# Locally exported CS2 resources (do not commit Valve game assets)
+/public/assets/maps/de_*/
