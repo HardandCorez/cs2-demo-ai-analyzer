@@ -1,5 +1,7 @@
-const originalFetch = window.fetch.bind(window);
-let lastPerformance = null;
+// Бейдж производительности разбора + честный прогресс-бар.
+// Раньше модуль сам патчил window.fetch; теперь слушает событие из analysis-events.js.
+
+import { getLastPerformance } from './analysis-events.js';
 
 function formatSeconds(ms) {
   const value = Number(ms);
@@ -8,6 +10,7 @@ function formatSeconds(ms) {
 }
 
 function renderPerformanceBadge() {
+  const lastPerformance = getLastPerformance();
   if (!lastPerformance) return;
   const box = document.querySelector('#matchBadges');
   if (!box) return;
@@ -29,28 +32,15 @@ function renderPerformanceBadge() {
   box.appendChild(badge);
 }
 
-window.fetch = async (...args) => {
-  const response = await originalFetch(...args);
-  try {
-    const input = args[0];
-    const url = typeof input === 'string' ? input : String(input?.url || '');
-    if (/\/api\/analyze(?:\?|$)/.test(url) && response.ok) {
-      response.clone().json().then((data) => {
-        lastPerformance = data?.parsePerformance || null;
-        setTimeout(renderPerformanceBadge, 80);
-      }).catch(() => {});
-    }
-  } catch {}
-  return response;
-};
+window.addEventListener('cs2:match-analyzed', () => setTimeout(renderPerformanceBadge, 80));
 
-// app.js uses a timer-based percentage while one POST is running. Keep the bar,
-// but do not pretend that 76%/88% is a specific backend parser stage.
+// app.js использует таймерный процент, пока идёт один POST. Бар оставляем,
+// но не притворяемся, что 76%/88% — это конкретная стадия серверного парсера.
 const observer = new MutationObserver(() => {
   const label = document.querySelector('#progressLabel');
   const percent = Number((document.querySelector('#progressPercent')?.textContent || '').replace(/[^0-9.]/g, ''));
   if (!label || !Number.isFinite(percent) || percent < 55 || percent >= 100) return;
-  if (label.textContent !== 'Fast Core: разбираем .dem…') label.textContent = 'Fast Core: разбираем .dem…';
+  if (label.textContent !== 'Разбираем .dem…') label.textContent = 'Разбираем .dem…';
   renderPerformanceBadge();
 });
 observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
