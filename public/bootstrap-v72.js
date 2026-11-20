@@ -1,3 +1,6 @@
+// Единый перехват fetch должен быть установлен до загрузки остальных модулей.
+await import('./analysis-events.js');
+
 const v10LiteCss=document.createElement('link');
 v10LiteCss.rel='stylesheet';
 v10LiteCss.href='/v10-lite.css';
@@ -15,16 +18,16 @@ await import('./v10-lite.js');
 await import('./v10-lite-allplayers.js');
 
 const brandSub=document.querySelector('.brand-sub');
-if(brandSub)brandSub.textContent='CS2 demo intelligence · V10 Lite 4.4 Fast Core';
+if(brandSub)brandSub.textContent='CS2 demo intelligence · Unified Core 5.0';
 
 const heroEyebrow=document.querySelector('.hero .eyebrow');
-if(heroEyebrow)heroEyebrow.textContent='FAST .DEM CORE · EPISODE COACH + MATCH HISTORY';
+if(heroEyebrow)heroEyebrow.textContent='REAL .DEM PARSER + EPISODE COACH + MATCH HISTORY';
 
 const heroText=document.querySelector('.hero-copy p');
-if(heroText)heroText.innerHTML='Загрузи полноценный <strong>.dem</strong>. Fast Core старается собрать основную статистику, positioning и составы одним tick-проходом; если демка несовместима, автоматически включается проверенное стабильное ядро. V10 Lite по-прежнему открывает только выбранные 8-секундные эпизоды.';
+if(heroText)heroText.innerHTML='Загрузи полноценный <strong>.dem</strong>. Единое ядро разбирает статистику и positioning одним tick-проходом; если демка несовместима, автоматически включается проверенное стабильное ядро. Эпизодный replay открывает выбранные 8-секундные фрагменты.';
 
 const firstKpi=document.querySelector('.hero-kpis .mini-card');
-if(firstKpi)firstKpi.innerHTML='<b>V10 Lite</b><span>Fast Core 4.4</span>';
+if(firstKpi)firstKpi.innerHTML='<b>Unified</b><span>Core 5.0</span>';
 
 const footer=document.querySelector('footer');
-if(footer)footer.textContent='HardandCore Demo AI · V10 Lite 4.4 · Fast Core + automatic stable fallback';
+if(footer)footer.textContent='HardandCore Demo AI · Unified Core 5.0 · Fast Core + automatic stable fallback';

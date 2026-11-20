@@ -1,3 +1,7 @@
+// V10 Lite: эпизоды смертей выбранного игрока + episode replay + safe-default coach.
+// Рефакторинг 5.0.0: вместо собственного патча window.fetch модуль слушает
+// событие 'cs2:match-analyzed' из analysis-events.js.
+
 import { defaultRadarLayer, getRadarMeta, loadRadarImage, worldToRadarFraction } from './radar-catalog.js';
 
 const $ = (s) => document.querySelector(s);
@@ -24,26 +28,24 @@ function captureFile(file) {
 document.querySelector('#demoInput')?.addEventListener('change', (e) => captureFile(e.target.files?.[0]));
 document.querySelector('#dropZone')?.addEventListener('drop', (e) => captureFile(e.dataTransfer?.files?.[0]));
 
-const originalFetch = window.fetch.bind(window);
-window.fetch = async (...args) => {
-  const response = await originalFetch(...args);
-  try {
-    const input = args[0];
-    const url = typeof input === 'string' ? input : String(input?.url || '');
-    if (/\/api\/analyze(?:\?|$)/.test(url) && response.ok) {
-      response.clone().json().then(async (data) => {
-        state.match = data;
-        state.selectedPlayerId = String(data?.players?.[0]?.steamid || data?.players?.[0]?.name || '');
-        state.episode = null;
-        state.replay = null;
-        state.coach = null;
-        try { state.meta = data?.map ? await getRadarMeta(data.map) : null; } catch { state.meta = null; }
-        setTimeout(renderEpisodePanel, 0);
-      }).catch(() => {});
-    }
-  } catch {}
-  return response;
-};
+window.addEventListener('cs2:match-analyzed', (event) => {
+  const data = event.detail;
+  if (!data) return;
+  state.match = data;
+  state.selectedPlayerId = String(data?.players?.[0]?.steamid || data?.players?.[0]?.name || '');
+  state.episode = null;
+  state.replay = null;
+  state.coach = null;
+  getRadarMetaSafe(data.map).then((meta) => {
+    state.meta = meta;
+    setTimeout(renderEpisodePanel, 0);
+  });
+});
+
+async function getRadarMetaSafe(map) {
+  if (!map) return null;
+  try { return await getRadarMeta(map); } catch { return null; }
+}
 
 function playerById(id) {
   if (!state.match) return null;
@@ -95,11 +97,11 @@ function ensurePanel() {
   panel.innerHTML = `
     <div class="panel-head">
       <div>
-        <div class="eyebrow">V10 LITE · EPISODE REPLAY + SAFE-DEFAULT COACH</div>
+        <div class="eyebrow">EPISODE REPLAY + SAFE-DEFAULT COACH</div>
         <h3>Эпизоды для разбора</h3>
         <div id="v10LiteHint" class="hint">Полный replay матча не строится. Для выбранного игрока доступны отдельные фрагменты его смертей.</div>
       </div>
-      <select id="v10LitePlayerSelect" aria-label="Игрок для V10 Lite"></select>
+      <select id="v10LitePlayerSelect" aria-label="Игрок для эпизодов"></select>
     </div>
     <div class="v10-lite-grid">
       <div id="v10LiteEpisodes" class="v10-lite-episodes"></div>
@@ -178,7 +180,7 @@ async function loadEpisodeReplay(ep, button) {
   form.append('before', '4');
   form.append('after', '4');
   try {
-    const response = await originalFetch('/api/episode-replay', { method: 'POST', body: form });
+    const response = await fetch('/api/episode-replay', { method: 'POST', body: form });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
     state.replay = data;
@@ -200,7 +202,7 @@ async function loadEpisodeCoach() {
   if (!box || !state.episode || !state.replay) return;
   box.innerHTML = '<div class="muted">Разбираем только выбранный эпизод…</div>';
   try {
-    const response = await originalFetch('/api/episode-coach', {
+    const response = await fetch('/api/episode-coach', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ episode: state.episode, replay: state.replay }),
@@ -266,7 +268,7 @@ function renderViewer() {
       <span id="v10LiteTime">−${Number(r.beforeSec || 4).toFixed(1)}с</span>
     </div>
     <div id="v10LiteCoach" class="v10-lite-coach"><div class="muted">Готовим coach-разбор выбранного эпизода…</div></div>
-    <div class="position-disclaimer">V10 Lite показывает только координаты короткого окна. WIDE*/REPEEK* — эвристики; navmesh и line-of-sight не используются.</div>`;
+    <div class="position-disclaimer">Replay показывает только координаты короткого окна. WIDE*/REPEEK* — эвристики; navmesh и line-of-sight не используются.</div>`;
   $('#v10LitePlay')?.addEventListener('click', togglePlay);
   $('#v10LiteError')?.addEventListener('click', () => { state.playing = false; stopAnimation(); state.time = 0; syncControls(); drawFrame(); });
   $('#v10LiteRange')?.addEventListener('input', (e) => { state.playing = false; stopAnimation(); state.time = Number(e.target.value); syncControls(); drawFrame(); });
@@ -420,8 +422,7 @@ function syncControls() {
   if (label) label.textContent = `${state.time >= 0 ? '+' : '−'}${Math.abs(state.time).toFixed(1)}с`;
 }
 
-// Keep V10 Lite synced with the scoreboard. We store the clicked player ourselves,
-// instead of relying on timing/class changes inside app.js.
+// Держим выбор игрока синхронизированным со scoreboard.
 document.addEventListener('click', (event) => {
   const row = event.target.closest('#scoreBody tr');
   if (!row) return;

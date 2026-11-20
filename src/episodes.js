@@ -1,66 +1,18 @@
-import 'dotenv/config';
-import express from 'express';
-import { requireLoopbackHost } from './local-security.js';
-import multer from 'multer';
-import path from 'node:path';
-import os from 'node:os';
-import fs from 'node:fs/promises';
-import { openAsBlob } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+// Эпизоды смертей и детерминированный safe-default coach.
+// Вынесено из бывшего server-v10lite.js при унификации (5.0.0).
+
 import { parseTicks } from '@laihoe/demoparser2';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const rootDir = path.resolve(__dirname, '..');
-const publicDir = path.join(rootDir, 'public');
-const publicPort = Number(process.env.PORT || 3000);
-const internalPort = publicPort + 1;
-const maxDemoMb = Math.max(50, Number(process.env.MAX_DEMO_MB || 800));
-const replayHz = Math.max(2, Math.min(8, Number(process.env.EPISODE_REPLAY_HZ || 4)));
-const tickRate = Math.max(32, Math.min(128, Number(process.env.DEMO_TICK_RATE || 64)));
-
-// Keep the proven stable parser unchanged on a private port.
-const previousPort = process.env.PORT;
-process.env.PORT = String(internalPort);
-await import('./server.js');
-if (previousPort === undefined) delete process.env.PORT;
-else process.env.PORT = previousPort;
-
-const internalBase = `http://127.0.0.1:${internalPort}`;
-const app = express();
-app.disable('x-powered-by');
-app.use(requireLoopbackHost);
-app.use(express.json({ limit: '4mb' }));
-app.use(express.static(publicDir));
-
-const upload = multer({
-  dest: os.tmpdir(),
-  limits: { fileSize: maxDemoMb * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => path.extname(file.originalname).toLowerCase() === '.dem'
-    ? cb(null, true)
-    : cb(new Error('Можно загружать только файлы .dem')),
-});
+export const EPISODE_CONFIG = {
+  replayHz: Math.max(2, Math.min(8, Number(process.env.EPISODE_REPLAY_HZ || 4))),
+  tickRate: Math.max(32, Math.min(128, Number(process.env.DEMO_TICK_RATE || 64))),
+};
 
 const arr = (v) => Array.isArray(v) ? v : [];
 const num = (v, d = 0) => Number.isFinite(Number(v)) ? Number(v) : d;
 const text = (v) => String(v ?? '').trim();
 
-async function forwardDemo(file) {
-  const form = new FormData();
-  form.append('demo', await openAsBlob(file.path, { type: 'application/octet-stream' }), file.originalname);
-  const response = await fetch(`${internalBase}/api/analyze`, { method: 'POST', body: form });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const error = new Error(data?.error || `Stable parser HTTP ${response.status}`);
-    error.status = response.status;
-    error.details = data?.details;
-    error.hint = data?.hint;
-    throw error;
-  }
-  return data;
-}
-
-function episodeFromDeath(e) {
+export function episodeFromDeath(e) {
   if (!e?.victim || !num(e.tick)) return null;
   const reasons = [];
   let score = 0;
@@ -87,48 +39,48 @@ function episodeFromDeath(e) {
   };
 }
 
-function buildReplayEpisodes(base) {
+export function buildReplayEpisodes(base) {
   return arr(base?.timeline)
     .map(episodeFromDeath)
     .filter(Boolean)
     .sort((a, b) => a.round - b.round || num(a.t, 999) - num(b.t, 999) || a.tick - b.tick);
 }
 
-function buildCriticalEpisodes(replayEpisodes) {
-  return replayEpisodes
+export function buildCriticalEpisodes(replayEpisodes) {
+  return arr(replayEpisodes)
     .filter((e) => e.critical)
     .sort((a, b) => b.score - a.score || a.round - b.round)
     .slice(0, 24);
 }
 
-function sampleTicks(targetTick, beforeSec, afterSec) {
-  const step = Math.max(1, Math.round(tickRate / replayHz));
-  const start = Math.max(1, Math.round(targetTick - beforeSec * tickRate));
-  const end = Math.max(start, Math.round(targetTick + afterSec * tickRate));
+export function sampleTicks(targetTick, beforeSec, afterSec) {
+  const step = Math.max(1, Math.round(EPISODE_CONFIG.tickRate / EPISODE_CONFIG.replayHz));
+  const start = Math.max(1, Math.round(targetTick - beforeSec * EPISODE_CONFIG.tickRate));
+  const end = Math.max(start, Math.round(targetTick + afterSec * EPISODE_CONFIG.tickRate));
   const ticks = [];
   for (let t = start; t <= end; t += step) ticks.push(t);
   if (!ticks.includes(targetTick)) ticks.push(targetTick);
   return [...new Set(ticks)].sort((a, b) => a - b);
 }
 
-function parseEpisodeRows(filePath, ticks) {
+export function parseEpisodeRows(filePath, ticks) {
   const props = ['X', 'Y', 'Z', 'yaw', 'team_num', 'team_name', 'is_alive', 'health'];
   try {
     return arr(parseTicks(filePath, props, ticks));
   } catch (error) {
-    console.warn('V10 Lite replay state fallback:', error?.message || error);
+    console.warn('Episode replay state fallback:', error?.message || error);
     try {
       return arr(parseTicks(filePath, ['X', 'Y', 'Z', 'team_num', 'is_alive'], ticks));
     } catch (fallbackError) {
-      console.warn('V10 Lite episode replay unavailable:', fallbackError?.message || fallbackError);
+      console.warn('Episode replay unavailable:', fallbackError?.message || fallbackError);
       return [];
     }
   }
 }
 
-function normalizeFrames(rows, targetTick) {
+export function normalizeFrames(rows, targetTick) {
   const byTick = new Map();
-  for (const row of rows) {
+  for (const row of arr(rows)) {
     const tick = num(row.tick);
     if (!tick) continue;
     if (!byTick.has(tick)) byTick.set(tick, []);
@@ -147,7 +99,7 @@ function normalizeFrames(rows, targetTick) {
   }
   return [...byTick.entries()].sort((a, b) => a[0] - b[0]).map(([tick, players]) => ({
     tick,
-    t: Number(((tick - targetTick) / tickRate).toFixed(3)),
+    t: Number(((tick - targetTick) / EPISODE_CONFIG.tickRate).toFixed(3)),
     players,
   }));
 }
@@ -179,7 +131,7 @@ function facingErrorDeg(victim, attacker) {
   return Math.abs(diff);
 }
 
-function buildEpisodeCoach(episode, replay) {
+export function buildEpisodeCoach(episode, replay) {
   const frames = arr(replay?.frames);
   const before = [...frames].filter((f) => num(f.t) <= -0.05).at(-1) || nearestFrame(frames, 0);
   const earlier = nearestFrame(frames, -1.5);
@@ -239,7 +191,7 @@ function buildEpisodeCoach(episode, replay) {
 
   return {
     episodeOnly: true,
-    provider: 'deterministic-safe-default-v10-lite-4.2',
+    provider: 'deterministic-safe-default',
     title: `R${episode.round} · ${episode.player} vs ${episode.attacker || 'opponent'}`,
     why,
     risks,
@@ -254,130 +206,3 @@ function buildEpisodeCoach(episode, replay) {
     limits: 'Safe-default coach: navmesh, стены и line-of-sight не моделируются. WIDE*/REPEEK*/trade-distance остаются эвристиками.',
   };
 }
-
-app.get('/api/health', async (_req, res) => {
-  try {
-    const response = await fetch(`${internalBase}/api/health`);
-    const data = await response.json().catch(() => ({}));
-    res.status(response.ok ? 200 : 502).json({
-      ...data,
-      ok: response.ok && data?.ok !== false,
-      build: 'v10-lite-4.2.0',
-      episodeReplayLite: true,
-      episodeCoachLite: true,
-      fullMatchReplay: false,
-    });
-  } catch (error) {
-    res.status(503).json({ ok: false, error: `Stable parser недоступен: ${error?.message || error}` });
-  }
-});
-
-app.post('/api/analyze', upload.single('demo'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'Файл .dem не получен' });
-  try {
-    const base = await forwardDemo(req.file);
-    const replayEpisodes = buildReplayEpisodes(base);
-    const criticalEpisodes = buildCriticalEpisodes(replayEpisodes);
-    res.json({
-      ...base,
-      replayEpisodes,
-      criticalEpisodes,
-      build: 'v10-lite-4.2.0',
-      dataAvailability: {
-        ...(base.dataAvailability || {}),
-        replayEpisodes: replayEpisodes.length > 0,
-        criticalEpisodes: criticalEpisodes.length > 0,
-        episodeReplayLite: true,
-        episodeCoachLite: true,
-        fullMatchReplay: false,
-      },
-    });
-  } catch (error) {
-    res.status(Number(error?.status) || 422).json({
-      error: error?.message || 'Не удалось разобрать демку',
-      details: error?.details,
-      hint: error?.hint,
-    });
-  } finally {
-    await fs.unlink(req.file.path).catch(() => {});
-  }
-});
-
-app.post('/api/episode-replay', upload.single('demo'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'Файл .dem не получен' });
-  const targetTick = Math.round(num(req.body?.tick));
-  const round = Math.max(1, Math.round(num(req.body?.round, 1)));
-  const beforeSec = Math.max(1, Math.min(6, num(req.body?.before, 4)));
-  const afterSec = Math.max(1, Math.min(6, num(req.body?.after, 4)));
-  if (!targetTick) {
-    await fs.unlink(req.file.path).catch(() => {});
-    return res.status(400).json({ error: 'Не передан tick эпизода' });
-  }
-
-  const started = Date.now();
-  try {
-    const ticks = sampleTicks(targetTick, beforeSec, afterSec);
-    const rows = parseEpisodeRows(req.file.path, ticks);
-    const frames = normalizeFrames(rows, targetTick);
-    if (!frames.length) return res.status(422).json({ error: 'Не удалось получить координаты для этого эпизода' });
-    res.json({
-      round,
-      targetTick,
-      tickRate,
-      sampleHz: replayHz,
-      beforeSec,
-      afterSec,
-      frames,
-      elapsedMs: Date.now() - started,
-      note: 'V10 Lite: только короткое окно вокруг выбранного эпизода; WIDE/REPEEK остаются эвристиками.',
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(422).json({ error: error?.message || 'Не удалось построить replay эпизода' });
-  } finally {
-    await fs.unlink(req.file.path).catch(() => {});
-  }
-});
-
-app.post('/api/episode-coach', (req, res) => {
-  const episode = req.body?.episode;
-  const replay = req.body?.replay;
-  if (!episode?.player || !Array.isArray(replay?.frames) || !replay.frames.length) {
-    return res.status(400).json({ error: 'Нет данных выбранного эпизода/replay для coach-разбора' });
-  }
-  try {
-    res.json(buildEpisodeCoach(episode, replay));
-  } catch (error) {
-    console.error(error);
-    res.status(422).json({ error: error?.message || 'Не удалось построить разбор эпизода' });
-  }
-});
-
-app.post('/api/ai', async (req, res) => {
-  try {
-    const response = await fetch(`${internalBase}/api/ai`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req.body || {}),
-    });
-    const data = await response.json().catch(() => ({}));
-    res.status(response.status).json(data);
-  } catch (error) {
-    res.status(502).json({ error: `AI route недоступен: ${error?.message || error}` });
-  }
-});
-
-app.use((error, _req, res, _next) => {
-  console.error(error);
-  if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
-    return res.status(413).json({ error: `Демка слишком большая. Лимит: ${maxDemoMb} MB.` });
-  }
-  res.status(400).json({ error: error?.message || 'Ошибка запроса' });
-});
-
-app.listen(publicPort, '127.0.0.1', () => {
-  console.log(`CS2 Demo AI Analyzer V10 Lite 4.2.0: http://localhost:${publicPort}`);
-  console.log(`Stable core internal: ${internalBase}`);
-  console.log(`Episode replay: all deaths available on demand, ${replayHz} fps, ±4s default`);
-  console.log('Episode coach: deterministic safe-default, selected episode only');
-});
